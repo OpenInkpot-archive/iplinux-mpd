@@ -70,17 +70,19 @@ playlist_append_file(struct playlist *playlist, const char *path, int uid,
 	struct stat st;
 	struct song *song;
 
-	if (uid <= 0)
-		/* unauthenticated client */
+	if (uid < 0) {
+		g_debug("unauthenticated client: %d", uid);
 		return PLAYLIST_RESULT_DENIED;
+    }
 
 	ret = stat(path, &st);
 	if (ret < 0)
 		return PLAYLIST_RESULT_ERRNO;
 
-	if (st.st_uid != (uid_t)uid && (st.st_mode & 0444) != 0444)
-		/* client is not owner */
+	if (st.st_uid != (uid_t)uid && (st.st_mode & 0444) != 0444) {
+		g_debug("client is not owner: %d (%o)", st.st_uid, st.st_mode);
 		return PLAYLIST_RESULT_DENIED;
+    }
 
 	song = song_file_load(path, NULL);
 	if (song == NULL)
