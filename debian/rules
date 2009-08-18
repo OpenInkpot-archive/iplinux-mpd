@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+ARCH=$(shell dpkg-architecture -qDEB_HOST_ARCH)
+WITH_TREMOR=--with-tremor
+
+DEB_BUILDDIR := debian/build
+DEB_CONFIGURE_USER_FLAGS += $(WITH_TREMOR) --disable-sqlite --enable-un --disable-ao --disable-oss --disable-httpd --disable-jack --disable-fifo --disable-mms --disable-lame-encoder --disable-curl --disable-ipv6 
+LDFLAGS += -Wl,--as-needed
+
+include /usr/share/cdbs/1/rules/debhelper.mk
+include /usr/share/cdbs/1/class/autotools.mk
+
+DEB_CONFIGURE_SCRIPT = $(CURDIR)/$(DEB_SRCDIR)/autogen.sh
+DEB_FIXPERMS_EXCLUDE:=var/*
+DEB_DH_INSTALLINIT_ARGS:=-n
+
+DEB_DH_STRIP_ARGS := --dbg-package=mpd-dbg
+# oh bleah. see #380614
+DEB_DESTDIR = $(CURDIR)/debian/mpd
+
+binary-post-install/mpd::
+	rm -rf $(CURDIR)/debian/mpd/usr/share/doc/mpd
