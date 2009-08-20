@@ -1,3 +1,10 @@
+mpd (0.15.1-1.ip1) asimov; urgency=low
+
+  * Upload to iplinux
+  * Fix issue with get uid of local user
+
+ -- Alexander V. Nikolaev <avn@daemon.hole.ru>  Thu, 20 Aug 2009 07:31:51 +0300
+
 mpd (0.15.1-1) unstable; urgency=low
 
   * New upstream release
