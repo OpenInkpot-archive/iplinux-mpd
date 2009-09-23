@@ -1,3 +1,9 @@
+mpd (0.15.1-1.ip2) asimov; urgency=low
+
+  * Missed build dependency on libid3tag0
+
+ -- Alexander V. Nikolaev <avn@daemon.hole.ru>  Wed, 23 Sep 2009 20:11:54 +0300
+
 mpd (0.15.1-1.ip1) asimov; urgency=low
 
   * Upload to iplinux
