@@ -67,6 +67,24 @@ struct audio_output_plugin {
 	void (*finish)(void *data);
 
 	/**
+	 * Enable the device.  This may allocate resources, preparing
+	 * for the device to be opened.  Enabling a device cannot
+	 * fail: if an error occurs during that, it should be reported
+	 * by the open() method.
+	 *
+	 * @param error_r location to store the error occuring, or
+	 * NULL to ignore errors
+	 * @return true on success, false on error
+	 */
+	bool (*enable)(void *data, GError **error_r);
+
+	/**
+	 * Disables the device.  It is closed before this method is
+	 * called.
+	 */
+	void (*disable)(void *data);
+
+	/**
 	 * Really open the device.
 	 *
 	 * @param audio_format the audio format in which data is going
@@ -97,6 +115,11 @@ struct audio_output_plugin {
 	 */
 	size_t (*play)(void *data, const void *chunk, size_t size,
 		       GError **error);
+
+	/**
+	 * Wait until the device has finished playing.
+	 */
+	void (*drain)(void *data);
 
 	/**
 	 * Try to cancel data which may still be in the device's
@@ -150,6 +173,22 @@ ao_plugin_finish(const struct audio_output_plugin *plugin, void *data)
 }
 
 static inline bool
+ao_plugin_enable(const struct audio_output_plugin *plugin, void *data,
+		 GError **error_r)
+{
+	return plugin->enable != NULL
+		? plugin->enable(data, error_r)
+		: true;
+}
+
+static inline void
+ao_plugin_disable(const struct audio_output_plugin *plugin, void *data)
+{
+	if (plugin->disable != NULL)
+		plugin->disable(data);
+}
+
+static inline bool
 ao_plugin_open(const struct audio_output_plugin *plugin,
 	       void *data, struct audio_format *audio_format,
 	       GError **error)
@@ -177,6 +216,13 @@ ao_plugin_play(const struct audio_output_plugin *plugin,
 	       GError **error)
 {
 	return plugin->play(data, chunk, size, error);
+}
+
+static inline void
+ao_plugin_drain(const struct audio_output_plugin *plugin, void *data)
+{
+	if (plugin->drain != NULL)
+		plugin->drain(data);
 }
 
 static inline void

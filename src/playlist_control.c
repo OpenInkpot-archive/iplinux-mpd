@@ -22,6 +22,7 @@
  *
  */
 
+#include "config.h"
 #include "playlist_internal.h"
 #include "player_control.h"
 
@@ -29,14 +30,6 @@
 
 #undef G_LOG_DOMAIN
 #define G_LOG_DOMAIN "playlist"
-
-enum {
-	/**
-	 * When the "prev" command is received, rewind the current
-	 * track if this number of seconds has already elapsed.
-	 */
-	PLAYLIST_PREV_UNLESS_ELAPSED = 10,
-};
 
 void playlist_stop(struct playlist *playlist)
 {
@@ -46,7 +39,7 @@ void playlist_stop(struct playlist *playlist)
 	assert(playlist->current >= 0);
 
 	g_debug("stop");
-	playerWait();
+	pc_stop();
 	playlist->queued = -1;
 	playlist->playing = false;
 
@@ -72,7 +65,7 @@ enum playlist_result playlist_play(struct playlist *playlist, int song)
 {
 	unsigned i = song;
 
-	clearPlayerError();
+	pc_clear_error();
 
 	if (song == -1) {
 		/* play any song ("current" song, or the first song */
@@ -83,7 +76,7 @@ enum playlist_result playlist_play(struct playlist *playlist, int song)
 		if (playlist->playing) {
 			/* already playing: unpause playback, just in
 			   case it was paused, and return */
-			playerSetPause(0);
+			pc_set_pause(false);
 			return PLAYLIST_RESULT_SUCCESS;
 		}
 
@@ -191,29 +184,21 @@ void playlist_previous(struct playlist *playlist)
 	if (!playlist->playing)
 		return;
 
-	if (g_timer_elapsed(playlist->prev_elapsed, NULL) >= 1.0 &&
-	    getPlayerElapsedTime() > PLAYLIST_PREV_UNLESS_ELAPSED) {
-		/* re-start playing the current song (just like the
-		   "prev" button on CD players) */
+	assert(queue_length(&playlist->queue) > 0);
 
-		playlist_play_order(playlist, playlist->current);
+	if (playlist->current > 0) {
+		/* play the preceding song */
+		playlist_play_order(playlist,
+				    playlist->current - 1);
+	} else if (playlist->queue.repeat) {
+		/* play the last song in "repeat" mode */
+		playlist_play_order(playlist,
+				    queue_length(&playlist->queue) - 1);
 	} else {
-		if (playlist->current > 0) {
-			/* play the preceding song */
-			playlist_play_order(playlist,
-						playlist->current - 1);
-		} else if (playlist->queue.repeat) {
-			/* play the last song in "repeat" mode */
-			playlist_play_order(playlist,
-						queue_length(&playlist->queue) - 1);
-		} else {
-			/* re-start playing the current song if it's
-			   the first one */
-			playlist_play_order(playlist, playlist->current);
-		}
+		/* re-start playing the current song if it's
+		   the first one */
+		playlist_play_order(playlist, playlist->current);
 	}
-
-	g_timer_start(playlist->prev_elapsed);
 }
 
 enum playlist_result
@@ -233,7 +218,7 @@ playlist_seek_song(struct playlist *playlist, unsigned song, float seek_time)
 	else
 		i = song;
 
-	clearPlayerError();
+	pc_clear_error();
 	playlist->stop_on_error = true;
 	playlist->error_count = 0;
 

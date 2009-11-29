@@ -17,7 +17,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../output_api.h"
+#include "config.h"
+#include "output_api.h"
 #include "mixer_list.h"
 
 #include <glib.h>
@@ -69,6 +70,16 @@ struct alsa_data {
 
 	/** the size of one audio frame */
 	size_t frame_size;
+
+	/**
+	 * The size of one period, in number of frames.
+	 */
+	snd_pcm_uframes_t period_frames;
+
+	/**
+	 * The number of frames written in the current period.
+	 */
+	snd_pcm_uframes_t period_position;
 };
 
 /**
@@ -413,6 +424,9 @@ configure_hw:
 	g_debug("buffer_size=%u period_size=%u",
 		(unsigned)alsa_buffer_size, (unsigned)alsa_period_size);
 
+	ad->period_frames = alsa_period_size;
+	ad->period_position = 0;
+
 	return true;
 
 error:
@@ -479,6 +493,7 @@ alsa_recover(struct alsa_data *ad, int err)
 		/* fall-through to snd_pcm_prepare: */
 	case SND_PCM_STATE_SETUP:
 	case SND_PCM_STATE_XRUN:
+		ad->period_position = 0;
 		err = snd_pcm_prepare(ad->pcm);
 		break;
 	case SND_PCM_STATE_DISCONNECTED:
@@ -496,20 +511,53 @@ alsa_recover(struct alsa_data *ad, int err)
 }
 
 static void
+alsa_drain(void *data)
+{
+	struct alsa_data *ad = data;
+
+	if (snd_pcm_state(ad->pcm) != SND_PCM_STATE_RUNNING)
+		return;
+
+	if (ad->period_position > 0) {
+		/* generate some silence to finish the partial
+		   period */
+		snd_pcm_uframes_t nframes =
+			ad->period_frames - ad->period_position;
+		size_t nbytes = nframes * ad->frame_size;
+		void *buffer = g_malloc(nbytes);
+		snd_pcm_hw_params_t *params;
+		snd_pcm_format_t format;
+		unsigned channels;
+
+		snd_pcm_hw_params_alloca(&params);
+		snd_pcm_hw_params_current(ad->pcm, params);
+		snd_pcm_hw_params_get_format(params, &format);
+		snd_pcm_hw_params_get_channels(params, &channels);
+
+		snd_pcm_format_set_silence(format, buffer, nframes * channels);
+		ad->writei(ad->pcm, buffer, nframes);
+		g_free(buffer);
+	}
+
+	snd_pcm_drain(ad->pcm);
+
+	ad->period_position = 0;
+}
+
+static void
 alsa_cancel(void *data)
 {
 	struct alsa_data *ad = data;
 
-	alsa_recover(ad, snd_pcm_drop(ad->pcm));
+	ad->period_position = 0;
+
+	snd_pcm_drop(ad->pcm);
 }
 
 static void
 alsa_close(void *data)
 {
 	struct alsa_data *ad = data;
-
-	if (snd_pcm_state(ad->pcm) == SND_PCM_STATE_RUNNING)
-		snd_pcm_drain(ad->pcm);
 
 	snd_pcm_close(ad->pcm);
 }
@@ -523,8 +571,11 @@ alsa_play(void *data, const void *chunk, size_t size, GError **error)
 
 	while (true) {
 		snd_pcm_sframes_t ret = ad->writei(ad->pcm, chunk, size);
-		if (ret > 0)
+		if (ret > 0) {
+			ad->period_position = (ad->period_position + ret)
+				% ad->period_frames;
 			return ret * ad->frame_size;
+		}
 
 		if (ret < 0 && ret != -EAGAIN && ret != -EINTR &&
 		    alsa_recover(ad, ret) < 0) {
@@ -542,7 +593,9 @@ const struct audio_output_plugin alsaPlugin = {
 	.finish = alsa_finish,
 	.open = alsa_open,
 	.play = alsa_play,
+	.drain = alsa_drain,
 	.cancel = alsa_cancel,
 	.close = alsa_close,
-	.mixer_plugin = &alsa_mixer,
+
+	.mixer_plugin = &alsa_mixer_plugin,
 };

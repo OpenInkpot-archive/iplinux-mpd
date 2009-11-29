@@ -17,7 +17,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "output_api.h"
+#include "fd_util.h"
 
 #include <glib.h>
 
@@ -91,7 +93,7 @@ solaris_output_open(void *data, struct audio_format *audio_format,
 
 	/* open the device in non-blocking mode */
 
-	so->fd = open(so->device, O_WRONLY|O_NONBLOCK);
+	so->fd = open_cloexec(so->device, O_WRONLY|O_NONBLOCK);
 	if (so->fd < 0) {
 		g_set_error(error, solaris_output_quark(), errno,
 			    "Failed to open %s: %s",

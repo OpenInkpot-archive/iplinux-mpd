@@ -22,14 +22,17 @@
 
 #include <glib.h>
 
+#include <stdbool.h>
+
 struct options {
 	gboolean kill;
 	gboolean daemon;
 	gboolean log_stderr;
 	gboolean verbose;
-	int create_db;
 };
 
-void parse_cmdline(int argc, char **argv, struct options *options);
+bool
+parse_cmdline(int argc, char **argv, struct options *options,
+	      GError **error_r);
 
 #endif

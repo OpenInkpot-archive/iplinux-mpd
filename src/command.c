@@ -17,14 +17,17 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "command.h"
 #include "player_control.h"
 #include "playlist.h"
 #include "playlist_print.h"
 #include "playlist_save.h"
+#include "playlist_queue.h"
 #include "queue_print.h"
 #include "ls.h"
 #include "uri.h"
+#include "decoder_print.h"
 #include "directory.h"
 #include "directory_print.h"
 #include "database.h"
@@ -43,8 +46,8 @@
 #include "client.h"
 #include "tag_print.h"
 #include "path.h"
+#include "replay_gain.h"
 #include "idle.h"
-#include "config.h"
 
 #ifdef ENABLE_SQLITE
 #include "sticker.h"
@@ -165,8 +168,8 @@ check_int(struct client *client, int *value_r,
 		return false;
 	}
 
-#if LONG_MAX > INT_MAX
-	if (value < INT_MIN || value > INT_MAX) {
+#if G_MAXLONG > G_MAXINT
+	if (value < G_MININT || value > G_MAXINT) {
 		command_error(client, ACK_ERROR_ARG,
 			      "Number too large: %s", s);
 		return false;
@@ -197,7 +200,7 @@ check_range(struct client *client, unsigned *value_r1, unsigned *value_r2,
 		/* compatibility with older MPD versions: specifying
 		   "-1" makes MPD display the whole list */
 		*value_r1 = 0;
-		*value_r2 = UINT_MAX;
+		*value_r2 = G_MAXUINT;
 		return true;
 	}
 
@@ -207,8 +210,8 @@ check_range(struct client *client, unsigned *value_r1, unsigned *value_r2,
 		return false;
 	}
 
-#if LONG_MAX > UINT_MAX
-	if (value > UINT_MAX) {
+#if G_MAXLONG > G_MAXUINT
+	if (value > G_MAXUINT) {
 		command_error(client, ACK_ERROR_ARG,
 			      "Number too large: %s", s);
 		return false;
@@ -219,7 +222,7 @@ check_range(struct client *client, unsigned *value_r1, unsigned *value_r2,
 
 	if (*test == ':') {
 		value = strtol(++test, &test2, 10);
-		if (*test2 != '\0' || test == test2) {
+		if (*test2 != '\0') {
 			va_list args;
 			va_start(args, fmt);
 			command_error_v(client, ACK_ERROR_ARG, fmt, args);
@@ -227,14 +230,17 @@ check_range(struct client *client, unsigned *value_r1, unsigned *value_r2,
 			return false;
 		}
 
+		if (test == test2)
+			value = G_MAXUINT;
+
 		if (value < 0) {
 			command_error(client, ACK_ERROR_ARG,
 				      "Number is negative: %s", s);
 			return false;
 		}
 
-#if LONG_MAX > UINT_MAX
-		if (value > UINT_MAX) {
+#if G_MAXLONG > G_MAXUINT
+		if (value > G_MAXUINT) {
 			command_error(client, ACK_ERROR_ARG,
 				      "Number too large: %s", s);
 			return false;
@@ -261,7 +267,7 @@ check_unsigned(struct client *client, unsigned *value_r, const char *s)
 		return false;
 	}
 
-	if (value > UINT_MAX) {
+	if (value > G_MAXUINT) {
 		command_error(client, ACK_ERROR_ARG,
 			      "Number too large: %s", s);
 		return false;
@@ -384,6 +390,14 @@ handle_urlhandlers(struct client *client,
 }
 
 static enum command_return
+handle_decoders(struct client *client,
+		G_GNUC_UNUSED int argc, G_GNUC_UNUSED char *argv[])
+{
+	decoder_list_print(client);
+	return COMMAND_RETURN_OK;
+}
+
+static enum command_return
 handle_tagtypes(struct client *client,
 		G_GNUC_UNUSED int argc, G_GNUC_UNUSED char *argv[])
 {
@@ -440,11 +454,11 @@ handle_pause(struct client *client,
 		bool pause_flag;
 		if (!check_bool(client, &pause_flag, argv[1]))
 			return COMMAND_RETURN_ERROR;
-		playerSetPause(pause_flag);
-		return COMMAND_RETURN_OK;
-	}
 
-	playerPause();
+		pc_set_pause(pause_flag);
+	} else
+		pc_pause();
+
 	return COMMAND_RETURN_OK;
 }
 
@@ -453,10 +467,14 @@ handle_status(struct client *client,
 	      G_GNUC_UNUSED int argc, G_GNUC_UNUSED char *argv[])
 {
 	const char *state = NULL;
+	struct player_status player_status;
 	int updateJobId;
+	char *error;
 	int song;
 
-	switch (getPlayerState()) {
+	pc_get_status(&player_status);
+
+	switch (player_status.state) {
 	case PLAYER_STATE_STOP:
 		state = "stop";
 		break;
@@ -485,7 +503,7 @@ handle_status(struct client *client,
 		      playlist_get_consume(&g_playlist),
 		      playlist_get_version(&g_playlist),
 		      playlist_get_length(&g_playlist),
-		      (int)(getPlayerCrossFade() + 0.5),
+		      (int)(pc_get_cross_fade() + 0.5),
 		      state);
 
 	song = playlist_get_current_song(&g_playlist);
@@ -496,17 +514,20 @@ handle_status(struct client *client,
 			      song, playlist_get_song_id(&g_playlist, song));
 	}
 
-	if (getPlayerState() != PLAYER_STATE_STOP) {
-		const struct audio_format *af = player_get_audio_format();
+	if (player_status.state != PLAYER_STATE_STOP) {
+		struct audio_format_string af_string;
+
 		client_printf(client,
 			      COMMAND_STATUS_TIME ": %i:%i\n"
 			      "elapsed: %1.3f\n"
-			      COMMAND_STATUS_BITRATE ": %li\n"
-			      COMMAND_STATUS_AUDIO ": %u:%u:%u\n",
-			      getPlayerElapsedTime(), getPlayerTotalTime(),
-			      pc.elapsed_time,
-			      getPlayerBitRate(),
-			      af->sample_rate, af->bits, af->channels);
+			      COMMAND_STATUS_BITRATE ": %u\n"
+			      COMMAND_STATUS_AUDIO ": %s\n",
+			      (int)(player_status.elapsed_time + 0.5),
+			      (int)(player_status.total_time + 0.5),
+			      player_status.elapsed_time,
+			      player_status.bit_rate,
+			      audio_format_to_string(&player_status.audio_format,
+						     &af_string));
 	}
 
 	if ((updateJobId = isUpdatingDB())) {
@@ -515,10 +536,12 @@ handle_status(struct client *client,
 			      updateJobId);
 	}
 
-	if (getPlayerError() != PLAYER_ERROR_NOERROR) {
+	error = pc_get_error_message();
+	if (error != NULL) {
 		client_printf(client,
 			      COMMAND_STATUS_ERROR ": %s\n",
-			      getPlayerErrorStr());
+			      error);
+		g_free(error);
 	}
 
 	song = playlist_get_next_song(&g_playlist);
@@ -632,13 +655,13 @@ handle_addid(struct client *client, int argc, char *argv[])
 static enum command_return
 handle_delete(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 {
-	int song;
+	unsigned start, end;
 	enum playlist_result result;
 
-	if (!check_int(client, &song, argv[1], need_positive))
+	if (!check_range(client, &start, &end, argv[1], need_range))
 		return COMMAND_RETURN_ERROR;
 
-	result = playlist_delete(&g_playlist, song);
+	result = playlist_delete_range(&g_playlist, start, end);
 	return print_playlist_result(client, result);
 }
 
@@ -698,6 +721,10 @@ static enum command_return
 handle_load(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 {
 	enum playlist_result result;
+
+	result = playlist_open_into_queue(argv[1], &g_playlist);
+	if (result != PLAYLIST_RESULT_NO_SUCH_LIST)
+		return result;
 
 	result = playlist_load_spl(&g_playlist, argv[1]);
 	return print_playlist_result(client, result);
@@ -809,7 +836,7 @@ handle_plchangesposid(struct client *client, G_GNUC_UNUSED int argc, char *argv[
 static enum command_return
 handle_playlistinfo(struct client *client, int argc, char *argv[])
 {
-	unsigned start = 0, end = UINT_MAX;
+	unsigned start = 0, end = G_MAXUINT;
 	bool ret;
 
 	if (argc == 2 && !check_range(client, &start, &end,
@@ -838,7 +865,7 @@ handle_playlistid(struct client *client, int argc, char *argv[])
 			return print_playlist_result(client,
 						     PLAYLIST_RESULT_NO_SUCH_SONG);
 	} else {
-		playlist_print_info(client, &g_playlist, 0, UINT_MAX);
+		playlist_print_info(client, &g_playlist, 0, G_MAXUINT);
 	}
 
 	return COMMAND_RETURN_OK;
@@ -867,6 +894,30 @@ handle_find(struct client *client, int argc, char *argv[])
 	locate_item_list_free(list);
 
 	return ret;
+}
+
+static enum command_return
+handle_findadd(struct client *client, int argc, char *argv[])
+{
+    int ret;
+    struct locate_item_list *list =
+	    locate_item_list_parse(argv + 1, argc - 1);
+    if (list == NULL || list->length == 0) {
+	    if (list != NULL)
+		    locate_item_list_free(list);
+
+	    command_error(client, ACK_ERROR_ARG, "incorrect arguments");
+	    return COMMAND_RETURN_ERROR;
+    }
+
+    ret = findAddIn(client, NULL, list);
+    if (ret == -1)
+	    command_error(client, ACK_ERROR_NO_EXIST,
+			  "directory or file not found");
+
+    locate_item_list_free(list);
+
+    return ret;
 }
 
 static enum command_return
@@ -994,14 +1045,35 @@ handle_playlistmove(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 static enum command_return
 handle_update(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 {
-	char *path = NULL;
+	const char *path = NULL;
 	unsigned ret;
 
 	assert(argc <= 2);
 	if (argc == 2)
-		path = g_strdup(argv[1]);
+		path = argv[1];
 
-	ret = directory_update_init(path);
+	ret = update_enqueue(path, false);
+	if (ret > 0) {
+		client_printf(client, "updating_db: %i\n", ret);
+		return COMMAND_RETURN_OK;
+	} else {
+		command_error(client, ACK_ERROR_UPDATE_ALREADY,
+			      "already updating");
+		return COMMAND_RETURN_ERROR;
+	}
+}
+
+static enum command_return
+handle_rescan(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
+{
+	const char *path = NULL;
+	unsigned ret;
+
+	assert(argc <= 2);
+	if (argc == 2)
+		path = argv[1];
+
+	ret = update_enqueue(path, true);
 	if (ret > 0) {
 		client_printf(client, "updating_db: %i\n", ret);
 		return COMMAND_RETURN_OK;
@@ -1159,7 +1231,7 @@ static enum command_return
 handle_clearerror(G_GNUC_UNUSED struct client *client,
 		  G_GNUC_UNUSED int argc, G_GNUC_UNUSED char *argv[])
 {
-	clearPlayerError();
+	pc_clear_error();
 	return COMMAND_RETURN_OK;
 }
 
@@ -1183,17 +1255,17 @@ handle_list(struct client *client, int argc, char *argv[])
 
 	/* for compatibility with < 0.12.0 */
 	if (argc == 3) {
-		if (tagType != TAG_ITEM_ALBUM) {
+		if (tagType != TAG_ALBUM) {
 			command_error(client, ACK_ERROR_ARG,
 				      "should be \"%s\" for 3 arguments",
-				      tag_item_names[TAG_ITEM_ALBUM]);
+				      tag_item_names[TAG_ALBUM]);
 			return COMMAND_RETURN_ERROR;
 		}
 
 		locate_item_list_parse(argv + 1, argc - 1);
 
 		conditionals = locate_item_list_new(1);
-		conditionals->items[0].tag = TAG_ITEM_ARTIST;
+		conditionals->items[0].tag = TAG_ARTIST;
 		conditionals->items[0].needle = g_strdup(argv[2]);
 	} else {
 		conditionals =
@@ -1350,7 +1422,7 @@ handle_crossfade(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 
 	if (!check_unsigned(client, &xfade_time, argv[1]))
 		return COMMAND_RETURN_ERROR;
-	setPlayerCrossFade(xfade_time);
+	pc_set_cross_fade(xfade_time);
 
 	return COMMAND_RETURN_OK;
 }
@@ -1464,6 +1536,28 @@ handle_listplaylists(struct client *client,
 }
 
 static enum command_return
+handle_replay_gain_mode(struct client *client,
+			G_GNUC_UNUSED int argc, char *argv[])
+{
+	if (!replay_gain_set_mode_string(argv[1])) {
+		command_error(client, ACK_ERROR_ARG,
+			      "Unrecognized replay gain mode");
+		return COMMAND_RETURN_ERROR;
+	}
+
+	return COMMAND_RETURN_OK;
+}
+
+static enum command_return
+handle_replay_gain_status(struct client *client,
+			  G_GNUC_UNUSED int argc, G_GNUC_UNUSED char *argv[])
+{
+	client_printf(client, "replay_gain_mode: %s\n",
+		      replay_gain_get_mode_string());
+	return COMMAND_RETURN_OK;
+}
+
+static enum command_return
 handle_idle(struct client *client,
 	    G_GNUC_UNUSED int argc, G_GNUC_UNUSED char *argv[])
 {
@@ -1506,13 +1600,14 @@ sticker_song_find_print_cb(struct song *song, const char *value,
 {
 	struct sticker_song_find_data *data = user_data;
 
-	song_print_url(data->client, song);
+	song_print_uri(data->client, song);
 	sticker_print_value(data->client, data->name, value);
 }
 
 static enum command_return
 handle_sticker_song(struct client *client, int argc, char *argv[])
 {
+	/* get song song_id key */
 	if (argc == 5 && strcmp(argv[1], "get") == 0) {
 		struct song *song;
 		char *value;
@@ -1535,6 +1630,7 @@ handle_sticker_song(struct client *client, int argc, char *argv[])
 		g_free(value);
 
 		return COMMAND_RETURN_OK;
+	/* list song song_id */
 	} else if (argc == 4 && strcmp(argv[1], "list") == 0) {
 		struct song *song;
 		struct sticker *sticker;
@@ -1557,6 +1653,7 @@ handle_sticker_song(struct client *client, int argc, char *argv[])
 		sticker_free(sticker);
 
 		return COMMAND_RETURN_OK;
+	/* set song song_id id key */
 	} else if (argc == 6 && strcmp(argv[1], "set") == 0) {
 		struct song *song;
 		bool ret;
@@ -1576,6 +1673,7 @@ handle_sticker_song(struct client *client, int argc, char *argv[])
 		}
 
 		return COMMAND_RETURN_OK;
+	/* delete song song_id [key] */
 	} else if ((argc == 4 || argc == 5) &&
 		   strcmp(argv[1], "delete") == 0) {
 		struct song *song;
@@ -1598,6 +1696,7 @@ handle_sticker_song(struct client *client, int argc, char *argv[])
 		}
 
 		return COMMAND_RETURN_OK;
+	/* find song dir key */
 	} else if (argc == 5 && strcmp(argv[1], "find") == 0) {
 		/* "sticker find song a/directory name" */
 		struct directory *directory;
@@ -1666,11 +1765,13 @@ static const struct command commands[] = {
 	{ "count", PERMISSION_READ, 2, -1, handle_count },
 	{ "crossfade", PERMISSION_CONTROL, 1, 1, handle_crossfade },
 	{ "currentsong", PERMISSION_READ, 0, 0, handle_currentsong },
+	{ "decoders", PERMISSION_READ, 0, 0, handle_decoders },
 	{ "delete", PERMISSION_CONTROL, 1, 1, handle_delete },
 	{ "deleteid", PERMISSION_CONTROL, 1, 1, handle_deleteid },
 	{ "disableoutput", PERMISSION_ADMIN, 1, 1, handle_disableoutput },
 	{ "enableoutput", PERMISSION_ADMIN, 1, 1, handle_enableoutput },
 	{ "find", PERMISSION_READ, 2, -1, handle_find },
+	{ "findadd", PERMISSION_READ, 2, -1, handle_findadd},
 	{ "idle", PERMISSION_READ, 0, -1, handle_idle },
 	{ "kill", PERMISSION_ADMIN, -1, -1, handle_kill },
 	{ "list", PERMISSION_READ, 1, -1, handle_list },
@@ -1706,6 +1807,11 @@ static const struct command commands[] = {
 	{ "random", PERMISSION_CONTROL, 1, 1, handle_random },
 	{ "rename", PERMISSION_CONTROL, 2, 2, handle_rename },
 	{ "repeat", PERMISSION_CONTROL, 1, 1, handle_repeat },
+	{ "replay_gain_mode", PERMISSION_CONTROL, 1, 1,
+	  handle_replay_gain_mode },
+	{ "replay_gain_status", PERMISSION_READ, 0, 0,
+	  handle_replay_gain_status },
+	{ "rescan", PERMISSION_ADMIN, 0, 1, handle_rescan },
 	{ "rm", PERMISSION_CONTROL, 1, 1, handle_rm },
 	{ "save", PERMISSION_CONTROL, 1, 1, handle_save },
 	{ "search", PERMISSION_READ, 2, -1, handle_search },
@@ -1912,7 +2018,7 @@ command_process(struct client *client, unsigned num, char *line)
 
 	while (argc < (int)G_N_ELEMENTS(argv) &&
 	       (argv[argc] =
-		tokenizer_next_word_or_string(&line, &error)) != NULL)
+		tokenizer_next_param(&line, &error)) != NULL)
 		++argc;
 
 	/* some error checks; we have to set current_command because

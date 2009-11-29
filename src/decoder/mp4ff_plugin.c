@@ -17,8 +17,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../decoder_api.h"
 #include "config.h"
+#include "decoder_api.h"
+#include "audio_check.h"
 
 #include <glib.h>
 
@@ -110,6 +111,7 @@ mp4_faad_new(mp4ff_t *mp4fh, int *track_r, struct audio_format *audio_format)
 	int track;
 	uint32_t sample_rate;
 	unsigned char channels;
+	GError *error = NULL;
 
 	decoder = faacDecOpen();
 
@@ -130,17 +132,15 @@ mp4_faad_new(mp4ff_t *mp4fh, int *track_r, struct audio_format *audio_format)
 		return NULL;
 	}
 
-	*track_r = track;
-	audio_format_init(audio_format, sample_rate, 16, channels);
-
-	if (!audio_format_valid(audio_format)) {
-		g_warning("Invalid audio format: %u:%u:%u\n",
-			  audio_format->sample_rate,
-			  audio_format->bits,
-			  audio_format->channels);
+	if (!audio_format_init_checked(audio_format, sample_rate, 16, channels,
+				       &error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
 		faacDecClose(decoder);
 		return NULL;
 	}
+
+	*track_r = track;
 
 	return decoder;
 }
@@ -391,22 +391,22 @@ mp4_tag_dup(const char *file)
 		mp4ff_meta_get_by_index(mp4fh, i, &item, &value);
 
 		if (0 == g_ascii_strcasecmp("artist", item)) {
-			tag_add_item(ret, TAG_ITEM_ARTIST, value);
+			tag_add_item(ret, TAG_ARTIST, value);
 		} else if (0 == g_ascii_strcasecmp("title", item)) {
-			tag_add_item(ret, TAG_ITEM_TITLE, value);
+			tag_add_item(ret, TAG_TITLE, value);
 		} else if (0 == g_ascii_strcasecmp("album", item)) {
-			tag_add_item(ret, TAG_ITEM_ALBUM, value);
+			tag_add_item(ret, TAG_ALBUM, value);
 		} else if (0 == g_ascii_strcasecmp("track", item)) {
-			tag_add_item(ret, TAG_ITEM_TRACK, value);
+			tag_add_item(ret, TAG_TRACK, value);
 		} else if (0 == g_ascii_strcasecmp("disc", item)) {
 			/* Is that the correct id? */
-			tag_add_item(ret, TAG_ITEM_DISC, value);
+			tag_add_item(ret, TAG_DISC, value);
 		} else if (0 == g_ascii_strcasecmp("genre", item)) {
-			tag_add_item(ret, TAG_ITEM_GENRE, value);
+			tag_add_item(ret, TAG_GENRE, value);
 		} else if (0 == g_ascii_strcasecmp("date", item)) {
-			tag_add_item(ret, TAG_ITEM_DATE, value);
+			tag_add_item(ret, TAG_DATE, value);
 		} else if (0 == g_ascii_strcasecmp("writer", item)) {
-			tag_add_item(ret, TAG_ITEM_COMPOSER, value);
+			tag_add_item(ret, TAG_COMPOSER, value);
 		}
 
 		free(item);

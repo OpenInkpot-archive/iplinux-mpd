@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "output_control.h"
 #include "output_api.h"
 #include "output_internal.h"
@@ -89,9 +90,10 @@ audio_output_mixer_type(const struct config_param *param)
 }
 
 static struct mixer *
-audio_output_load_mixer(const struct config_param *param,
+audio_output_load_mixer(void *ao, const struct config_param *param,
 			const struct mixer_plugin *plugin,
-			struct filter *filter_chain)
+			struct filter *filter_chain,
+			GError **error_r)
 {
 	struct mixer *mixer;
 
@@ -104,10 +106,10 @@ audio_output_load_mixer(const struct config_param *param,
 		if (plugin == NULL)
 			return NULL;
 
-		return mixer_new(plugin, param);
+		return mixer_new(plugin, ao, param, error_r);
 
 	case MIXER_TYPE_SOFTWARE:
-		mixer = mixer_new(&software_mixer_plugin, NULL);
+		mixer = mixer_new(&software_mixer_plugin, NULL, NULL, NULL);
 		assert(mixer != NULL);
 
 		filter_chain_append(filter_chain,
@@ -121,23 +123,24 @@ audio_output_load_mixer(const struct config_param *param,
 
 bool
 audio_output_init(struct audio_output *ao, const struct config_param *param,
-		  GError **error)
+		  GError **error_r)
 {
 	const struct audio_output_plugin *plugin = NULL;
+	GError *error = NULL;
 
 	if (param) {
 		const char *p;
 
 		p = config_get_block_string(param, AUDIO_OUTPUT_TYPE, NULL);
 		if (p == NULL) {
-			g_set_error(error, audio_output_quark(), 0,
+			g_set_error(error_r, audio_output_quark(), 0,
 				    "Missing \"type\" configuration");
 			return false;
 		}
 
 		plugin = audio_output_plugin_get(p);
 		if (plugin == NULL) {
-			g_set_error(error, audio_output_quark(), 0,
+			g_set_error(error_r, audio_output_quark(), 0,
 				    "No such audio output plugin: %s", p);
 			return false;
 		}
@@ -145,26 +148,26 @@ audio_output_init(struct audio_output *ao, const struct config_param *param,
 		ao->name = config_get_block_string(param, AUDIO_OUTPUT_NAME,
 						   NULL);
 		if (ao->name == NULL) {
-			g_set_error(error, audio_output_quark(), 0,
+			g_set_error(error_r, audio_output_quark(), 0,
 				    "Missing \"name\" configuration");
 			return false;
 		}
 
 		p = config_get_block_string(param, AUDIO_OUTPUT_FORMAT,
 						 NULL);
-		ao->config_audio_format = p != NULL;
 		if (p != NULL) {
 			bool success =
-				audio_format_parse(&ao->out_audio_format,
-						   p, error);
+				audio_format_parse(&ao->config_audio_format,
+						   p, true, error_r);
 			if (!success)
 				return false;
-		}
+		} else
+			audio_format_clear(&ao->config_audio_format);
 	} else {
 		g_warning("No \"%s\" defined in config file\n",
 			  CONF_AUDIO_OUTPUT);
 
-		plugin = audio_output_detect(error);
+		plugin = audio_output_detect(error_r);
 		if (plugin == NULL)
 			return false;
 
@@ -172,12 +175,15 @@ audio_output_init(struct audio_output *ao, const struct config_param *param,
 			  plugin->name);
 
 		ao->name = "default detected output";
-		ao->config_audio_format = false;
+
+		audio_format_clear(&ao->config_audio_format);
 	}
 
 	ao->plugin = plugin;
 	ao->enabled = config_get_block_bool(param, "enabled", true);
+	ao->really_enabled = false;
 	ao->open = false;
+	ao->pause = false;
 	ao->fail_timer = NULL;
 
 	/* set up the filter chain */
@@ -186,19 +192,24 @@ audio_output_init(struct audio_output *ao, const struct config_param *param,
 	assert(ao->filter != NULL);
 
 	ao->thread = NULL;
-	notify_init(&ao->notify);
 	ao->command = AO_COMMAND_NONE;
 	ao->mutex = g_mutex_new();
+	ao->cond = g_cond_new();
 
 	ao->data = ao_plugin_init(plugin,
-				  ao->config_audio_format
-				  ? &ao->out_audio_format : NULL,
-				  param, error);
+				  &ao->config_audio_format,
+				  param, error_r);
 	if (ao->data == NULL)
 		return false;
 
-	ao->mixer = audio_output_load_mixer(param, plugin->mixer_plugin,
-					    ao->filter);
+	ao->mixer = audio_output_load_mixer(ao->data, param,
+					    plugin->mixer_plugin,
+					    ao->filter, &error);
+	if (ao->mixer == NULL && error != NULL) {
+		g_warning("Failed to initialize hardware mixer for '%s': %s",
+			  ao->name, error->message);
+		g_error_free(error);
+	}
 
 	/* the "convert" filter must be the last one in the chain */
 

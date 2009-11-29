@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "dbUtils.h"
 #include "locate.h"
 #include "directory.h"
@@ -59,7 +60,7 @@ static int
 printSongInDirectory(struct song *song, G_GNUC_UNUSED void *data)
 {
 	struct client *client = data;
-	song_print_url(client, song);
+	song_print_uri(client, song);
 	return 0;
 }
 
@@ -200,6 +201,28 @@ int addAllInToStoredPlaylist(const char *name, const char *utf8file)
 }
 
 static int
+findAddInDirectory(struct song *song, void *_data)
+{
+	struct search_data *data = _data;
+
+	if (locate_song_match(song, data->criteria))
+		return directoryAddSongToPlaylist(song, data);
+
+	return 0;
+}
+
+int findAddIn(struct client *client, const char *name,
+	      const struct locate_item_list *criteria)
+{
+	struct search_data data;
+
+	data.client   = client;
+	data.criteria = criteria;
+
+	return db_walk(name, findAddInDirectory, NULL, &data);
+}
+
+static int
 directoryPrintSongInfo(struct song *song, void *data)
 {
 	struct client *client = data;
@@ -236,7 +259,7 @@ visitTag(struct client *client, struct strset *set,
 	struct tag *tag = song->tag;
 
 	if (tagType == LOCATE_TAG_FILE_TYPE) {
-		song_print_url(client, song);
+		song_print_uri(client, song);
 		return;
 	}
 

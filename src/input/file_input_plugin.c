@@ -17,8 +17,10 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h" /* must be first for large file support */
 #include "input/file_input_plugin.h"
 #include "input_plugin.h"
+#include "fd_util.h"
 
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -38,7 +40,7 @@ input_file_open(struct input_stream *is, const char *filename)
 
 	char* pathname = g_strdup(filename);
 
-	if (filename[0] != '/')
+	if (!g_path_is_absolute(filename))
 	{
 		g_free(pathname);
 		return false;
@@ -49,7 +51,7 @@ input_file_open(struct input_stream *is, const char *filename)
 		*slash = '\0';
 	}
 
-	fd = open(pathname, O_RDONLY);
+	fd = open_cloexec(pathname, O_RDONLY, 0);
 	if (fd < 0) {
 		is->error = errno;
 		g_debug("Failed to open \"%s\": %s",
@@ -92,11 +94,11 @@ input_file_open(struct input_stream *is, const char *filename)
 }
 
 static bool
-input_file_seek(struct input_stream *is, off_t offset, int whence)
+input_file_seek(struct input_stream *is, goffset offset, int whence)
 {
 	int fd = GPOINTER_TO_INT(is->data);
 
-	offset = lseek(fd, offset, whence);
+	offset = (goffset)lseek(fd, (off_t)offset, whence);
 	if (offset < 0) {
 		is->error = errno;
 		return false;

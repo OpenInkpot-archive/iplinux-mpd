@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "permission.h"
 #include "conf.h"
 
@@ -111,7 +112,7 @@ void initPermissions(void)
 		permission_default = parsePermissions(param->value);
 }
 
-int getPermissionFromPassword(char *password, unsigned *permission)
+int getPermissionFromPassword(char const* password, unsigned* permission)
 {
 	bool found;
 	gpointer key, value;

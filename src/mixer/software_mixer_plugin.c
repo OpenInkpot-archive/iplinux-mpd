@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "software_mixer_plugin.h"
 #include "mixer_api.h"
 #include "filter_plugin.h"
@@ -37,7 +38,9 @@ struct software_mixer {
 };
 
 static struct mixer *
-software_mixer_init(G_GNUC_UNUSED const struct config_param *param)
+software_mixer_init(G_GNUC_UNUSED void *ao,
+		    G_GNUC_UNUSED const struct config_param *param,
+		    G_GNUC_UNUSED GError **error_r)
 {
 	struct software_mixer *sm = g_new(struct software_mixer, 1);
 
@@ -59,25 +62,8 @@ software_mixer_finish(struct mixer *data)
 	g_free(sm);
 }
 
-static bool
-software_mixer_open(struct mixer *data)
-{
-	struct software_mixer *sm = (struct software_mixer *)data;
-
-	(void)sm;
-	return true;
-}
-
-static void
-software_mixer_close(struct mixer *data)
-{
-	struct software_mixer *sm = (struct software_mixer *)data;
-
-	(void)sm;
-}
-
 static int
-software_mixer_get_volume(struct mixer *mixer)
+software_mixer_get_volume(struct mixer *mixer, G_GNUC_UNUSED GError **error_r)
 {
 	struct software_mixer *sm = (struct software_mixer *)mixer;
 
@@ -85,7 +71,8 @@ software_mixer_get_volume(struct mixer *mixer)
 }
 
 static bool
-software_mixer_set_volume(struct mixer *mixer, unsigned volume)
+software_mixer_set_volume(struct mixer *mixer, unsigned volume,
+			  G_GNUC_UNUSED GError **error_r)
 {
 	struct software_mixer *sm = (struct software_mixer *)mixer;
 
@@ -106,8 +93,6 @@ software_mixer_set_volume(struct mixer *mixer, unsigned volume)
 const struct mixer_plugin software_mixer_plugin = {
 	.init = software_mixer_init,
 	.finish = software_mixer_finish,
-	.open = software_mixer_open,
-	.close = software_mixer_close,
 	.get_volume = software_mixer_get_volume,
 	.set_volume = software_mixer_set_volume,
 	.global = true,

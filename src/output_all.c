@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "output_all.h"
 #include "output_internal.h"
 #include "output_control.h"
@@ -51,6 +52,11 @@ static struct music_buffer *g_music_buffer;
  * by audio_output_all_play().
  */
 static struct music_pipe *g_mp;
+
+/**
+ * The "elapsed_time" stamp of the most recently finished chunk.
+ */
+static float audio_output_all_elapsed_time = -1.0;
 
 unsigned int audio_output_count(void)
 {
@@ -148,6 +154,25 @@ audio_output_all_finish(void)
 	notify_deinit(&audio_output_client_notify);
 }
 
+void
+audio_output_all_enable_disable(void)
+{
+	for (unsigned i = 0; i < num_audio_outputs; i++) {
+		struct audio_output *ao = &audio_outputs[i];
+		bool enabled;
+
+		g_mutex_lock(ao->mutex);
+		enabled = ao->really_enabled;
+		g_mutex_unlock(ao->mutex);
+
+		if (ao->enabled != enabled) {
+			if (ao->enabled)
+				audio_output_enable(ao);
+			else
+				audio_output_disable(ao);
+		}
+	}
+}
 
 /**
  * Determine if all (active) outputs have finished the current
@@ -156,10 +181,18 @@ audio_output_all_finish(void)
 static bool
 audio_output_all_finished(void)
 {
-	for (unsigned i = 0; i < num_audio_outputs; ++i)
-		if (audio_output_is_open(&audio_outputs[i]) &&
-		    !audio_output_command_is_finished(&audio_outputs[i]))
+	for (unsigned i = 0; i < num_audio_outputs; ++i) {
+		struct audio_output *ao = &audio_outputs[i];
+		bool not_finished;
+
+		g_mutex_lock(ao->mutex);
+		not_finished = audio_output_is_open(ao) &&
+			!audio_output_command_is_finished(ao);
+		g_mutex_unlock(ao->mutex);
+
+		if (not_finished)
 			return false;
+	}
 
 	return true;
 }
@@ -168,6 +201,29 @@ static void audio_output_wait_all(void)
 {
 	while (!audio_output_all_finished())
 		notify_wait(&audio_output_client_notify);
+}
+
+/**
+ * Signals the audio output if it is open.  This function locks the
+ * mutex.
+ */
+static void
+audio_output_lock_signal(struct audio_output *ao)
+{
+	g_mutex_lock(ao->mutex);
+	if (audio_output_is_open(ao))
+		g_cond_signal(ao->cond);
+	g_mutex_unlock(ao->mutex);
+}
+
+/**
+ * Signals all audio outputs which are open.
+ */
+static void
+audio_output_signal_all(void)
+{
+	for (unsigned i = 0; i < num_audio_outputs; ++i)
+		audio_output_lock_signal(&audio_outputs[i]);
 }
 
 static void
@@ -237,8 +293,7 @@ audio_output_all_play(struct music_chunk *chunk)
 	music_pipe_push(g_mp, chunk);
 
 	for (i = 0; i < num_audio_outputs; ++i)
-		if (audio_output_is_open(&audio_outputs[i]))
-			audio_output_play(&audio_outputs[i]);
+		audio_output_play(&audio_outputs[i]);
 
 	return true;
 }
@@ -273,6 +328,7 @@ audio_output_all_open(const struct audio_format *audio_format,
 	input_audio_format = *audio_format;
 
 	audio_output_all_reset_reopen();
+	audio_output_all_enable_disable();
 	audio_output_all_update();
 
 	for (i = 0; i < num_audio_outputs; ++i) {
@@ -385,6 +441,11 @@ audio_output_all_check(void)
 			   this chunk */
 			return music_pipe_size(g_mp);
 
+		if (chunk->length > 0 && chunk->times >= 0.0)
+			/* only update elapsed_time if the chunk
+			   provides a defined value */
+			audio_output_all_elapsed_time = chunk->times;
+
 		is_tail = chunk->next == NULL;
 		if (is_tail)
 			/* this is the tail of the pipe - clear the
@@ -412,10 +473,15 @@ audio_output_all_check(void)
 bool
 audio_output_all_wait(unsigned threshold)
 {
-	if (audio_output_all_check() < threshold)
-		return true;
+	player_lock();
 
-	notify_wait(&pc.notify);
+	if (audio_output_all_check() < threshold) {
+		player_unlock();
+		return true;
+	}
+
+	player_wait();
+	player_unlock();
 
 	return audio_output_all_check() < threshold;
 }
@@ -428,8 +494,16 @@ audio_output_all_pause(void)
 	audio_output_all_update();
 
 	for (i = 0; i < num_audio_outputs; ++i)
-		if (audio_output_is_open(&audio_outputs[i]))
-			audio_output_pause(&audio_outputs[i]);
+		audio_output_pause(&audio_outputs[i]);
+
+	audio_output_wait_all();
+}
+
+void
+audio_output_all_drain(void)
+{
+	for (unsigned i = 0; i < num_audio_outputs; ++i)
+		audio_output_drain_async(&audio_outputs[i]);
 
 	audio_output_wait_all();
 }
@@ -441,10 +515,8 @@ audio_output_all_cancel(void)
 
 	/* send the cancel() command to all audio outputs */
 
-	for (i = 0; i < num_audio_outputs; ++i) {
-		if (audio_output_is_open(&audio_outputs[i]))
-			audio_output_cancel(&audio_outputs[i]);
-	}
+	for (i = 0; i < num_audio_outputs; ++i)
+		audio_output_cancel(&audio_outputs[i]);
 
 	audio_output_wait_all();
 
@@ -452,6 +524,15 @@ audio_output_all_cancel(void)
 
 	if (g_mp != NULL)
 		music_pipe_clear(g_mp, g_music_buffer);
+
+	/* the audio outputs are now waiting for a signal, to
+	   synchronize the cleared music pipe */
+
+	audio_output_signal_all();
+
+	/* invalidate elapsed_time */
+
+	audio_output_all_elapsed_time = -1.0;
 }
 
 void
@@ -473,4 +554,12 @@ audio_output_all_close(void)
 	g_music_buffer = NULL;
 
 	audio_format_clear(&input_audio_format);
+
+	audio_output_all_elapsed_time = -1.0;
+}
+
+float
+audio_output_all_get_elapsed_time(void)
+{
+	return audio_output_all_elapsed_time;
 }

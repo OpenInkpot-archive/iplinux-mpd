@@ -17,10 +17,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "mixer_control.h"
 #include "mixer_api.h"
-
-#include <glib.h>
 
 #include <assert.h>
 #include <stddef.h>
@@ -29,13 +28,15 @@
 #define G_LOG_DOMAIN "mixer"
 
 struct mixer *
-mixer_new(const struct mixer_plugin *plugin, const struct config_param *param)
+mixer_new(const struct mixer_plugin *plugin, void *ao,
+	  const struct config_param *param,
+	  GError **error_r)
 {
 	struct mixer *mixer;
 
 	assert(plugin != NULL);
 
-	mixer = plugin->init(param);
+	mixer = plugin->init(ao, param, error_r);
 
 	assert(mixer == NULL || mixer->plugin == plugin);
 
@@ -55,7 +56,7 @@ mixer_free(struct mixer *mixer)
 }
 
 bool
-mixer_open(struct mixer *mixer)
+mixer_open(struct mixer *mixer, GError **error_r)
 {
 	bool success;
 
@@ -66,8 +67,10 @@ mixer_open(struct mixer *mixer)
 
 	if (mixer->open)
 		success = true;
+	else if (mixer->plugin->open == NULL)
+		success = mixer->open = true;
 	else
-		success = mixer->open = mixer->plugin->open(mixer);
+		success = mixer->open = mixer->plugin->open(mixer, error_r);
 
 	mixer->failed = !success;
 
@@ -83,7 +86,9 @@ mixer_close_internal(struct mixer *mixer)
 	assert(mixer->plugin != NULL);
 	assert(mixer->open);
 
-	mixer->plugin->close(mixer);
+	if (mixer->plugin->close != NULL)
+		mixer->plugin->close(mixer);
+
 	mixer->open = false;
 }
 
@@ -123,21 +128,26 @@ mixer_failed(struct mixer *mixer)
 }
 
 int
-mixer_get_volume(struct mixer *mixer)
+mixer_get_volume(struct mixer *mixer, GError **error_r)
 {
 	int volume;
 
 	assert(mixer != NULL);
 
-	if (mixer->plugin->global && !mixer->failed && !mixer_open(mixer))
+	if (mixer->plugin->global && !mixer->failed &&
+	    !mixer_open(mixer, error_r))
 		return -1;
 
 	g_mutex_lock(mixer->mutex);
 
 	if (mixer->open) {
-		volume = mixer->plugin->get_volume(mixer);
-		if (volume < 0)
+		GError *error = NULL;
+
+		volume = mixer->plugin->get_volume(mixer, &error);
+		if (volume < 0 && error != NULL) {
+			g_propagate_error(error_r, error);
 			mixer_failed(mixer);
+		}
 	} else
 		volume = -1;
 
@@ -147,22 +157,21 @@ mixer_get_volume(struct mixer *mixer)
 }
 
 bool
-mixer_set_volume(struct mixer *mixer, unsigned volume)
+mixer_set_volume(struct mixer *mixer, unsigned volume, GError **error_r)
 {
 	bool success;
 
 	assert(mixer != NULL);
 	assert(volume <= 100);
 
-	if (mixer->plugin->global && !mixer->failed && !mixer_open(mixer))
+	if (mixer->plugin->global && !mixer->failed &&
+	    !mixer_open(mixer, error_r))
 		return false;
 
 	g_mutex_lock(mixer->mutex);
 
 	if (mixer->open) {
-		success = mixer->plugin->set_volume(mixer, volume);
-		if (!success)
-			mixer_failed(mixer);
+		success = mixer->plugin->set_volume(mixer, volume, error_r);
 	} else
 		success = false;
 

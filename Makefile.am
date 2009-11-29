@@ -1,5 +1,5 @@
 ACLOCAL_AMFLAGS = -I m4
-AUTOMAKE_OPTIONS = foreign 1.10 dist-bzip2
+AUTOMAKE_OPTIONS = foreign 1.10 dist-bzip2 subdir-objects
 
 AM_CPPFLAGS = -I$(srcdir)/src $(GLIB_CFLAGS)
 
@@ -29,10 +29,12 @@ src_mpd_LDADD = $(MPD_LIBS) \
 	$(GLIB_LIBS)
 
 mpd_headers = \
+	src/check.h \
 	src/notify.h \
 	src/ack.h \
 	src/audio.h \
 	src/audio_format.h \
+	src/audio_check.h \
 	src/audio_parser.h \
 	src/output_internal.h \
 	src/output_api.h \
@@ -71,19 +73,30 @@ mpd_headers = \
 	src/encoder_plugin.h \
 	src/encoder_list.h \
 	src/encoder_api.h \
+	src/exclude.h \
+	src/fd_util.h \
 	src/fifo_buffer.h \
 	src/update.h \
+	src/update_internal.h \
+	src/inotify_source.h \
+	src/inotify_queue.h \
+	src/inotify_update.h \
 	src/dirvec.h \
 	src/gcc.h \
 	src/decoder_list.h \
+	src/decoder_print.h \
+	src/decoder/flac_compat.h \
+	src/decoder/flac_metadata.h \
+	src/decoder/flac_pcm.h \
 	src/decoder/_flac_common.h \
 	src/decoder/_ogg_common.h \
 	src/input_plugin.h \
 	src/input_stream.h \
 	src/input/file_input_plugin.h \
 	src/input/curl_input_plugin.h \
-	src/input/lastfm_input_plugin.h \
 	src/input/mms_input_plugin.h \
+	src/text_file.h \
+	src/text_input_stream.h \
 	src/icy_server.h \
 	src/icy_metadata.h \
 	src/client.h \
@@ -100,6 +113,7 @@ mpd_headers = \
 	src/mixer_plugin.h \
 	src/mixer_type.h \
 	src/mixer/software_mixer_plugin.h \
+	src/mixer/pulse_mixer_plugin.h \
 	src/daemon.h \
 	src/normalize.h \
 	src/compress.h \
@@ -110,6 +124,7 @@ mpd_headers = \
 	src/mapper.h \
 	src/output/httpd_client.h \
 	src/output/httpd_internal.h \
+	src/output/pulse_output_plugin.h \
 	src/page.h \
 	src/pcm_buffer.h \
 	src/pcm_utils.h \
@@ -131,6 +146,15 @@ mpd_headers = \
 	src/playlist_print.h \
 	src/playlist_save.h \
 	src/playlist_state.h \
+	src/playlist_plugin.h \
+	src/playlist_list.h \
+	src/playlist_queue.h \
+	src/playlist/extm3u_playlist_plugin.h \
+	src/playlist/m3u_playlist_plugin.h \
+	src/playlist/pls_playlist_plugin.h \
+	src/playlist/xspf_playlist_plugin.h \
+	src/playlist/asx_playlist_plugin.h \
+	src/playlist/lastfm_playlist_plugin.h \
 	src/poison.h \
 	src/riff.h \
 	src/aiff.h \
@@ -175,6 +199,7 @@ src_mpd_SOURCES = \
 	$(mpd_headers) \
 	$(ARCHIVE_SRC) \
 	$(INPUT_SRC) \
+	$(PLAYLIST_SRC) \
 	$(TAG_SRC) \
 	$(DECODER_SRC) \
 	$(ENCODER_SRC) \
@@ -183,6 +208,8 @@ src_mpd_SOURCES = \
 	$(FILTER_SRC) \
 	src/notify.c \
 	src/audio.c \
+	src/audio_check.c \
+	src/audio_format.c \
 	src/audio_parser.c \
 	src/command.c \
 	src/idle.c \
@@ -194,15 +221,21 @@ src_mpd_SOURCES = \
 	src/decoder_control.c \
 	src/decoder_api.c \
 	src/decoder_internal.c \
+	src/decoder_print.c \
 	src/directory.c \
 	src/directory_save.c \
 	src/directory_print.c \
 	src/database.c \
 	src/dirvec.c \
+	src/exclude.c \
+	src/fd_util.c \
 	src/fifo_buffer.c \
 	src/filter_plugin.c \
 	src/filter_registry.c \
 	src/update.c \
+	src/update_queue.c \
+	src/update_walk.c \
+	src/update_remove.c \
 	src/client.c \
 	src/client_event.c \
 	src/client_expire.c \
@@ -246,12 +279,14 @@ src_mpd_SOURCES = \
 	src/playlist_print.c \
 	src/playlist_save.c \
 	src/playlist_state.c \
+	src/playlist_queue.c \
 	src/queue.c \
 	src/queue_print.c \
 	src/queue_save.c \
 	src/replay_gain.c \
 	src/sig_handlers.c \
 	src/song.c \
+	src/song_update.c \
 	src/song_print.c \
 	src/song_save.c \
 	src/songvec.c \
@@ -263,6 +298,8 @@ src_mpd_SOURCES = \
 	src/tag_print.c \
 	src/tag_save.c \
 	src/tokenizer.c \
+	src/text_file.c \
+	src/text_input_stream.c \
 	src/strset.c \
 	src/uri.c \
 	src/utils.c \
@@ -270,6 +307,13 @@ src_mpd_SOURCES = \
 	src/locate.c \
 	src/stored_playlist.c \
 	src/timer.c
+
+if ENABLE_INOTIFY
+src_mpd_SOURCES += \
+	src/inotify_source.c \
+	src/inotify_queue.c \
+	src/inotify_update.c
+endif
 
 if ENABLE_SQLITE
 src_mpd_SOURCES += \
@@ -348,6 +392,7 @@ DECODER_CFLAGS = \
 	$(WILDMIDI_CFLAGS) \
 	$(WAVPACK_CFLAGS) \
 	$(MAD_CFLAGS) \
+	$(MPG123_CFLAGS) \
 	$(FFMPEG_CFLAGS) \
 	$(CUE_CFLAGS)
 
@@ -362,16 +407,22 @@ DECODER_LIBS = \
 	$(WILDMIDI_LIBS) \
 	$(WAVPACK_LIBS) \
 	$(MAD_LIBS) \
+	$(MPG123_LIBS) \
 	$(MP4FF_LIBS) \
 	$(FFMPEG_LIBS) \
 	$(CUE_LIBS)
 
 DECODER_SRC = \
 	src/decoder_buffer.c \
+	src/decoder_plugin.c \
 	src/decoder_list.c
 
 if HAVE_MAD
 DECODER_SRC += src/decoder/mad_plugin.c
+endif
+
+if HAVE_MPG123
+DECODER_SRC += src/decoder/mpg123_decoder_plugin.c
 endif
 
 if HAVE_MPCDEC
@@ -395,7 +446,10 @@ DECODER_SRC += src/decoder/_ogg_common.c
 endif
 
 if HAVE_FLAC_COMMON
-DECODER_SRC += src/decoder/_flac_common.c
+DECODER_SRC += \
+	src/decoder/flac_metadata.c \
+	src/decoder/flac_pcm.c \
+	src/decoder/_flac_common.c
 endif
 
 if ENABLE_VORBIS_DECODER
@@ -447,17 +501,24 @@ endif
 ENCODER_CFLAGS = \
 	$(LAME_CFLAGS) \
 	$(TWOLAME_CFLAGS) \
+	$(patsubst -I%/FLAC,-I%,$(FLAC_CFLAGS)) \
 	$(VORBISENC_CFLAGS)
 
 ENCODER_LIBS = \
 	$(LAME_LIBS) \
 	$(TWOLAME_LIBS) \
+	$(FLAC_LIBS) \
 	$(VORBISENC_LIBS)
 
 ENCODER_SRC =
 
 if ENABLE_ENCODER
 ENCODER_SRC += src/encoder_list.c
+ENCODER_SRC += src/encoder/null_encoder.c
+
+if ENABLE_WAVE_ENCODER
+ENCODER_SRC += src/encoder/wave_encoder.c
+endif
 
 if ENABLE_VORBIS_ENCODER
 ENCODER_SRC += src/encoder/vorbis_encoder.c
@@ -469,6 +530,10 @@ endif
 
 if ENABLE_TWOLAME_ENCODER
 ENCODER_SRC += src/encoder/twolame_encoder.c
+endif
+
+if ENABLE_FLAC_ENCODER
+ENCODER_SRC += src/encoder/flac_encoder.c
 endif
 endif
 
@@ -505,12 +570,8 @@ INPUT_SRC = \
 	src/input_stream.c \
 	src/input/file_input_plugin.c
 
-if HAVE_CURL
+if ENABLE_CURL
 INPUT_SRC += src/input/curl_input_plugin.c src/icy_metadata.c
-endif
-
-if ENABLE_LASTFM
-INPUT_SRC += src/input/lastfm_input_plugin.c
 endif
 
 if ENABLE_MMS
@@ -556,7 +617,7 @@ MIXER_SRC = \
 
 if HAVE_ALSA
 OUTPUT_SRC += src/output/alsa_plugin.c
-MIXER_SRC += src/mixer/alsa_mixer.c
+MIXER_SRC += src/mixer/alsa_mixer_plugin.c
 endif
 
 if HAVE_AO
@@ -564,7 +625,7 @@ OUTPUT_SRC += src/output/ao_plugin.c
 endif
 
 if HAVE_FIFO
-OUTPUT_SRC += src/output/fifo_plugin.c
+OUTPUT_SRC += src/output/fifo_output_plugin.c
 endif
 
 if ENABLE_PIPE_OUTPUT
@@ -572,7 +633,7 @@ OUTPUT_SRC += src/output/pipe_output_plugin.c
 endif
 
 if HAVE_JACK
-OUTPUT_SRC += src/output/jack_plugin.c
+OUTPUT_SRC += src/output/jack_output_plugin.c
 endif
 
 if HAVE_MVP
@@ -581,7 +642,11 @@ endif
 
 if HAVE_OSS
 OUTPUT_SRC += src/output/oss_plugin.c
-MIXER_SRC += src/mixer/oss_mixer.c
+MIXER_SRC += src/mixer/oss_mixer_plugin.c
+endif
+
+if HAVE_OPENAL
+OUTPUT_SRC += src/output/openal_plugin.c
 endif
 
 if HAVE_OSX
@@ -589,12 +654,16 @@ OUTPUT_SRC += src/output/osx_plugin.c
 endif
 
 if HAVE_PULSE
-OUTPUT_SRC += src/output/pulse_plugin.c
-MIXER_SRC += src/mixer/pulse_mixer.c
+OUTPUT_SRC += src/output/pulse_output_plugin.c
+MIXER_SRC += src/mixer/pulse_mixer_plugin.c
 endif
 
 if HAVE_SHOUT
 OUTPUT_SRC += src/output/shout_plugin.c
+endif
+
+if ENABLE_RECORDER_OUTPUT
+OUTPUT_SRC += src/output/recorder_output_plugin.c
 endif
 
 if ENABLE_HTTPD_OUTPUT
@@ -606,6 +675,23 @@ endif
 
 if ENABLE_SOLARIS_OUTPUT
 OUTPUT_SRC += src/output/solaris_output_plugin.c
+endif
+
+
+#
+# Playlist plugins
+#
+
+PLAYLIST_SRC = \
+	src/playlist/extm3u_playlist_plugin.c \
+	src/playlist/m3u_playlist_plugin.c \
+	src/playlist/pls_playlist_plugin.c \
+	src/playlist/xspf_playlist_plugin.c \
+	src/playlist/asx_playlist_plugin.c \
+	src/playlist_list.c
+
+if ENABLE_LASTFM
+PLAYLIST_SRC += src/playlist/lastfm_playlist_plugin.c
 endif
 
 
@@ -649,11 +735,13 @@ if ENABLE_TEST
 noinst_PROGRAMS = \
 	test/read_conf \
 	test/run_input \
+	test/dump_playlist \
 	test/run_decoder \
 	test/read_tags \
 	test/run_filter \
 	test/run_output \
 	test/read_mixer \
+	test/run_convert \
 	test/software_volume
 
 test_read_conf_CPPFLAGS = $(AM_CPPFLAGS) \
@@ -673,8 +761,26 @@ test_run_input_LDADD = $(MPD_LIBS) \
 test_run_input_SOURCES = test/run_input.c \
 	src/conf.c src/tokenizer.c src/utils.c \
 	src/tag.c src/tag_pool.c src/tag_save.c \
+	src/fd_util.c \
 	$(ARCHIVE_SRC) \
 	$(INPUT_SRC)
+
+test_dump_playlist_CPPFLAGS = $(AM_CPPFLAGS) \
+	$(ARCHIVE_CFLAGS) \
+	$(INPUT_CFLAGS)
+test_dump_playlist_LDADD = $(MPD_LIBS) \
+	$(ARCHIVE_LIBS) \
+	$(INPUT_LIBS) \
+	$(GLIB_LIBS)
+test_dump_playlist_SOURCES = test/dump_playlist.c \
+	src/conf.c src/tokenizer.c src/utils.c \
+	src/uri.c \
+	src/song.c src/tag.c src/tag_pool.c src/tag_save.c \
+	src/text_input_stream.c src/fifo_buffer.c \
+	src/fd_util.c \
+	$(ARCHIVE_SRC) \
+	$(INPUT_SRC) \
+	$(PLAYLIST_SRC)
 
 test_run_decoder_CPPFLAGS = $(AM_CPPFLAGS) \
 	$(TAG_CFLAGS) \
@@ -690,6 +796,9 @@ test_run_decoder_SOURCES = test/run_decoder.c \
 	src/tag.c src/tag_pool.c \
 	src/replay_gain.c \
 	src/uri.c \
+	src/fd_util.c \
+	src/audio_check.c \
+	src/audio_format.c \
 	$(ARCHIVE_SRC) \
 	$(INPUT_SRC) \
 	$(TAG_SRC) \
@@ -709,6 +818,8 @@ test_read_tags_SOURCES = test/read_tags.c \
 	src/tag.c src/tag_pool.c \
 	src/replay_gain.c \
 	src/uri.c \
+	src/fd_util.c \
+	src/audio_check.c \
 	$(ARCHIVE_SRC) \
 	$(INPUT_SRC) \
 	$(TAG_SRC) \
@@ -725,6 +836,8 @@ test_run_filter_SOURCES = test/run_filter.c \
 	src/pcm_volume.c src/pcm_convert.c src/pcm_byteswap.c \
 	src/pcm_format.c src/pcm_channels.c src/pcm_dither.c \
 	src/pcm_resample.c src/pcm_resample_fallback.c \
+	src/audio_check.c \
+	src/audio_format.c \
 	src/audio_parser.c \
 	$(FILTER_SRC)
 
@@ -738,6 +851,8 @@ test_run_encoder_SOURCES = test/run_encoder.c \
 	src/conf.c src/tokenizer.c \
 	src/utils.c \
 	src/tag.c src/tag_pool.c \
+	src/audio_check.c \
+	src/audio_format.c \
 	src/audio_parser.c \
 	$(ENCODER_SRC)
 test_run_encoder_LDADD = $(MPD_LIBS) \
@@ -746,10 +861,30 @@ test_run_encoder_LDADD = $(MPD_LIBS) \
 endif
 
 test_software_volume_SOURCES = test/software_volume.c \
+	src/audio_check.c \
 	src/audio_parser.c \
 	src/pcm_volume.c
 test_software_volume_LDADD = \
 	$(GLIB_LIBS)
+
+test_run_convert_SOURCES = test/run_convert.c \
+	src/audio_check.c \
+	src/audio_parser.c \
+	src/pcm_channels.c \
+	src/pcm_format.c \
+	src/pcm_dither.c \
+	src/pcm_byteswap.c \
+	src/pcm_resample.c \
+	src/pcm_resample_fallback.c \
+	src/pcm_convert.c
+test_run_convert_CPPFLAGS = $(AM_CPPFLAGS) $(SAMPLERATE_CFLAGS)
+test_run_convert_LDADD = \
+	$(SAMPLERATE_LIBS) \
+	$(GLIB_LIBS)
+
+if HAVE_LIBSAMPLERATE
+test_run_convert_SOURCES += src/pcm_resample_libsamplerate.c
+endif
 
 test_run_output_CPPFLAGS = $(AM_CPPFLAGS) \
 	$(ENCODER_CFLAGS) \
@@ -760,6 +895,8 @@ test_run_output_LDADD = $(MPD_LIBS) \
 	$(GLIB_LIBS)
 test_run_output_SOURCES = test/run_output.c \
 	src/conf.c src/tokenizer.c src/utils.c src/log.c \
+	src/audio_check.c \
+	src/audio_format.c \
 	src/audio_parser.c \
 	src/timer.c \
 	src/tag.c src/tag_pool.c \
@@ -776,6 +913,7 @@ test_run_output_SOURCES = test/run_output.c \
 	src/filter/convert_filter_plugin.c \
 	src/filter/volume_filter_plugin.c \
 	src/pcm_volume.c \
+	src/fd_util.c \
 	$(OUTPUT_SRC)
 
 test_read_mixer_CPPFLAGS = $(AM_CPPFLAGS) \
@@ -788,6 +926,7 @@ test_read_mixer_SOURCES = test/read_mixer.c \
 	src/mixer_control.c src/mixer_api.c \
 	src/filter_plugin.c \
 	src/filter/volume_filter_plugin.c \
+	src/fd_util.c \
 	$(MIXER_SRC)
 
 endif

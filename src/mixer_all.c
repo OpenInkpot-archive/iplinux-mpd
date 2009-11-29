@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "mixer_all.h"
 #include "mixer_control.h"
 #include "output_all.h"
@@ -38,6 +39,8 @@ output_mixer_get_volume(unsigned i)
 {
 	struct audio_output *output;
 	struct mixer *mixer;
+	int volume;
+	GError *error = NULL;
 
 	assert(i < audio_output_count());
 
@@ -49,7 +52,14 @@ output_mixer_get_volume(unsigned i)
 	if (mixer == NULL)
 		return -1;
 
-	return mixer_get_volume(mixer);
+	volume = mixer_get_volume(mixer, &error);
+	if (volume < 0 && error != NULL) {
+		g_warning("Failed to read mixer for '%s': %s",
+			  output->name, error->message);
+		g_error_free(error);
+	}
+
+	return volume;
 }
 
 int
@@ -77,6 +87,8 @@ output_mixer_set_volume(unsigned i, unsigned volume)
 {
 	struct audio_output *output;
 	struct mixer *mixer;
+	bool success;
+	GError *error = NULL;
 
 	assert(i < audio_output_count());
 	assert(volume <= 100);
@@ -89,7 +101,14 @@ output_mixer_set_volume(unsigned i, unsigned volume)
 	if (mixer == NULL)
 		return false;
 
-	return mixer_set_volume(mixer, volume);
+	success = mixer_set_volume(mixer, volume, &error);
+	if (!success && error != NULL) {
+		g_warning("Failed to set mixer for '%s': %s",
+			  output->name, error->message);
+		g_error_free(error);
+	}
+
+	return success;
 }
 
 bool
@@ -123,7 +142,7 @@ output_mixer_get_software_volume(unsigned i)
 	if (mixer == NULL || mixer->plugin != &software_mixer_plugin)
 		return -1;
 
-	return mixer_get_volume(mixer);
+	return mixer_get_volume(mixer, NULL);
 }
 
 int
@@ -157,6 +176,6 @@ mixer_all_set_software_volume(unsigned volume)
 		struct audio_output *output = audio_output_get(i);
 		if (output->mixer != NULL &&
 		    output->mixer->plugin == &software_mixer_plugin)
-			mixer_set_volume(output->mixer, volume);
+			mixer_set_volume(output->mixer, volume, NULL);
 	}
 }

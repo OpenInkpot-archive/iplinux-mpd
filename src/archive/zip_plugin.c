@@ -21,6 +21,7 @@
   * zip archive handling (requires zziplib)
   */
 
+#include "config.h"
 #include "archive_api.h"
 #include "archive_api.h"
 #include "input_plugin.h"
@@ -157,7 +158,7 @@ zip_is_eof(struct input_stream *is)
 
 static bool
 zip_is_seek(G_GNUC_UNUSED struct input_stream *is,
-	G_GNUC_UNUSED off_t offset, G_GNUC_UNUSED int whence)
+	    G_GNUC_UNUSED goffset offset, G_GNUC_UNUSED int whence)
 {
 	zip_context *context = (zip_context *) is->data;
 	zzip_off_t ofs = zzip_seek(context->file, offset, whence);

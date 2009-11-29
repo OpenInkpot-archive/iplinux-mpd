@@ -81,13 +81,6 @@ struct playlist {
 	 * This variable is only valid if #playing is true.
 	 */
 	int queued;
-
-	/**
-	 * This timer tracks the time elapsed since the last "prev"
-	 * command.  If that is less than one second ago, "prev" jumps
-	 * to the previous song instead of rewinding the current song.
-	 */
-	GTimer *prev_elapsed;
 };
 
 /** the global playlist object */
@@ -140,6 +133,15 @@ playlist_append_song(struct playlist *playlist,
 
 enum playlist_result
 playlist_delete(struct playlist *playlist, unsigned song);
+
+/**
+ * Deletes a range of songs from the playlist.
+ *
+ * @param start the position of the first song to delete
+ * @param end the position after the last song to delete
+ */
+enum playlist_result
+playlist_delete_range(struct playlist *playlist, unsigned start, unsigned end);
 
 enum playlist_result
 playlist_delete_id(struct playlist *playlist, unsigned song);

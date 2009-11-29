@@ -17,11 +17,13 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "httpd_client.h"
 #include "httpd_internal.h"
 #include "fifo_buffer.h"
 #include "page.h"
 #include "icy_server.h"
+#include "glib_compat.h"
 
 #include <stdbool.h>
 #include <assert.h>
@@ -481,11 +483,6 @@ httpd_client_queue_size(const struct httpd_client *client)
 	g_queue_foreach(client->pages, httpd_client_add_page_size, &size);
 	return size;
 }
-
-/* g_queue_clear() was introduced in GLib 2.14 */
-#if !GLIB_CHECK_VERSION(2,14,0)
-#define g_queue_clear(q) do { g_queue_free(q); q = g_queue_new(); } while (0)
-#endif
 
 void
 httpd_client_cancel(struct httpd_client *client)

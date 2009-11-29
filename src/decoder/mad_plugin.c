@@ -17,10 +17,11 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../decoder_api.h"
-#include "../conf.h"
 #include "config.h"
+#include "decoder_api.h"
+#include "conf.h"
 #include "tag_id3.h"
+#include "audio_check.h"
 
 #include <assert.h>
 #include <unistd.h>
@@ -779,10 +780,10 @@ mp3_frame_duration(const struct mad_frame *frame)
 			       MAD_UNITS_MILLISECONDS) / 1000.0;
 }
 
-static off_t
+static goffset
 mp3_this_frame_offset(const struct mp3_data *data)
 {
-	off_t offset = data->input_stream->offset;
+	goffset offset = data->input_stream->offset;
 
 	if (data->stream.this_frame != NULL)
 		offset -= data->stream.bufend - data->stream.this_frame;
@@ -792,7 +793,7 @@ mp3_this_frame_offset(const struct mp3_data *data)
 	return offset;
 }
 
-static off_t
+static goffset
 mp3_rest_including_this_frame(const struct mp3_data *data)
 {
 	return data->input_stream->size - mp3_this_frame_offset(data);
@@ -804,7 +805,7 @@ mp3_rest_including_this_frame(const struct mp3_data *data)
 static void
 mp3_filesize_to_song_length(struct mp3_data *data)
 {
-	off_t rest = mp3_rest_including_this_frame(data);
+	goffset rest = mp3_rest_including_this_frame(data);
 
 	if (rest > 0) {
 		float frame_duration = mp3_frame_duration(&data->frame);
@@ -1174,6 +1175,7 @@ static void
 mp3_decode(struct decoder *decoder, struct input_stream *input_stream)
 {
 	struct mp3_data data;
+	GError *error = NULL;
 	struct tag *tag = NULL;
 	struct replay_gain_info *replay_gain_info = NULL;
 	struct audio_format audio_format;
@@ -1185,8 +1187,20 @@ mp3_decode(struct decoder *decoder, struct input_stream *input_stream)
 		return;
 	}
 
-	audio_format_init(&audio_format, data.frame.header.samplerate, 24,
-			  MAD_NCHANNELS(&data.frame.header));
+	if (!audio_format_init_checked(&audio_format,
+				       data.frame.header.samplerate, 24,
+				       MAD_NCHANNELS(&data.frame.header),
+				       &error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
+
+		if (tag != NULL)
+			tag_free(tag);
+		if (replay_gain_info != NULL)
+			replay_gain_info_free(replay_gain_info);
+		mp3_data_finish(&data);
+		return;
+	}
 
 	decoder_initialized(decoder, &audio_format,
 			    data.input_stream->seekable, data.total_time);

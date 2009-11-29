@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "locate.h"
 #include "path.h"
 #include "tag.h"
@@ -42,9 +43,9 @@ locate_parse_type(const char *str)
 	if (0 == g_ascii_strcasecmp(str, LOCATE_TAG_ANY_KEY))
 		return LOCATE_TAG_ANY_TYPE;
 
-	for (i = 0; i < TAG_NUM_OF_ITEM_TYPES; i++)
-		if (0 == g_ascii_strcasecmp(str, tag_item_names[i]))
-			return i;
+	i = tag_name_parse_i(str);
+	if (i != TAG_NUM_OF_ITEM_TYPES)
+		return i;
 
 	return -1;
 }

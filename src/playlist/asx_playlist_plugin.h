@@ -17,9 +17,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#ifndef LASTFM_INPUT_PLUGIN_H
-#define LASTFM_INPUT_PLUGIN_H
+#ifndef MPD_PLAYLIST_ASX_PLAYLIST_PLUGIN_H
+#define MPD_PLAYLIST_ASX_PLAYLIST_PLUGIN_H
 
-extern const struct input_plugin lastfm_input_plugin;
+extern const struct playlist_plugin asx_playlist_plugin;
 
 #endif

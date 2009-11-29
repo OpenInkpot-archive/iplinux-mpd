@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "output_api.h"
 #include "encoder_plugin.h"
 #include "encoder_list.h"
@@ -126,6 +127,13 @@ my_shout_init_driver(const struct audio_format *audio_format,
 	struct block_param *block_param;
 	int public;
 
+	if (audio_format == NULL ||
+	    !audio_format_fully_defined(audio_format)) {
+		g_set_error(error, shout_output_quark(), 0,
+			    "Need full audio format specification");
+		return NULL;
+	}
+
 	sd = new_shout_data();
 
 	if (shout_init_count == 0)
@@ -190,8 +198,6 @@ my_shout_init_driver(const struct audio_format *audio_format,
 			return NULL;
 		}
 	}
-
-	check_block_param("format");
 
 	encoding = config_get_block_string(param, "encoding", "ogg");
 	encoder_plugin = shout_encoder_plugin_get(encoding);
@@ -471,10 +477,10 @@ shout_tag_to_metadata(const struct tag *tag, char *dest, size_t size)
 
 	for (unsigned i = 0; i < tag->num_items; i++) {
 		switch (tag->items[i]->type) {
-		case TAG_ITEM_ARTIST:
+		case TAG_ARTIST:
 			strncpy(artist, tag->items[i]->value, size);
 			break;
-		case TAG_ITEM_TITLE:
+		case TAG_TITLE:
 			strncpy(title, tag->items[i]->value, size);
 			break;
 

@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "tag_ape.h"
 #include "tag.h"
 
@@ -26,13 +27,13 @@
 #include <stdio.h>
 
 static const char *const ape_tag_names[] = {
-	[TAG_ITEM_TITLE] = "title",
-	[TAG_ITEM_ARTIST] = "artist",
-	[TAG_ITEM_ALBUM] = "album",
-	[TAG_ITEM_COMMENT] = "comment",
-	[TAG_ITEM_GENRE] = "genre",
-	[TAG_ITEM_TRACK] = "track",
-	[TAG_ITEM_DATE] = "year"
+	[TAG_TITLE] = "title",
+	[TAG_ARTIST] = "artist",
+	[TAG_ALBUM] = "album",
+	[TAG_COMMENT] = "comment",
+	[TAG_GENRE] = "genre",
+	[TAG_TRACK] = "track",
+	[TAG_DATE] = "year"
 };
 
 static struct tag *

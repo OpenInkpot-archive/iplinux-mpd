@@ -17,13 +17,13 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-/* TODO 'ogg' should probably be replaced with 'oggvorbis' in all instances */
-
-#include "_ogg_common.h"
 #include "config.h"
+#include "_ogg_common.h"
+#include "audio_check.h"
 #include "uri.h"
 
 #ifndef HAVE_TREMOR
+#define OV_EXCLUDE_STATIC_CALLBACKS
 #include <vorbis/vorbisfile.h>
 #else
 #include <tremor/ivorbisfile.h>
@@ -55,17 +55,17 @@
 #define OGG_DECODE_USE_BIGENDIAN	0
 #endif
 
-typedef struct _OggCallbackData {
+struct vorbis_decoder_data {
 	struct decoder *decoder;
 
 	struct input_stream *input_stream;
 	bool seekable;
-} OggCallbackData;
+};
 
 static size_t ogg_read_cb(void *ptr, size_t size, size_t nmemb, void *vdata)
 {
+	struct vorbis_decoder_data *data = (struct vorbis_decoder_data *)vdata;
 	size_t ret;
-	OggCallbackData *data = (OggCallbackData *) vdata;
 
 	ret = decoder_read(data->decoder, data->input_stream, ptr, size * nmemb);
 
@@ -76,7 +76,7 @@ static size_t ogg_read_cb(void *ptr, size_t size, size_t nmemb, void *vdata)
 
 static int ogg_seek_cb(void *vdata, ogg_int64_t offset, int whence)
 {
-	const OggCallbackData *data = (const OggCallbackData *) vdata;
+	struct vorbis_decoder_data *data = (struct vorbis_decoder_data *)vdata;
 
 	return data->seekable &&
 		decoder_get_command(data->decoder) != DECODE_COMMAND_STOP &&
@@ -92,9 +92,34 @@ static int ogg_close_cb(G_GNUC_UNUSED void *vdata)
 
 static long ogg_tell_cb(void *vdata)
 {
-	const OggCallbackData *data = (const OggCallbackData *) vdata;
+	const struct vorbis_decoder_data *data =
+		(const struct vorbis_decoder_data *)vdata;
 
 	return (long)data->input_stream->offset;
+}
+
+static const char *
+vorbis_strerror(int code)
+{
+	switch (code) {
+	case OV_EREAD:
+		return "read error";
+
+	case OV_ENOTVORBIS:
+		return "not vorbis stream";
+
+	case OV_EVERSION:
+		return "vorbis version mismatch";
+
+	case OV_EBADHEADER:
+		return "invalid vorbis header";
+
+	case OV_EFAULT:
+		return "internal logic error";
+
+	default:
+		return "unknown error";
+	}
 }
 
 static const char *
@@ -176,11 +201,11 @@ vorbis_parse_comment(struct tag *tag, const char *comment)
 	assert(tag != NULL);
 
 	if (vorbis_copy_comment(tag, comment, VORBIS_COMMENT_TRACK_KEY,
-				TAG_ITEM_TRACK) ||
+				TAG_TRACK) ||
 	    vorbis_copy_comment(tag, comment, VORBIS_COMMENT_DISC_KEY,
-				TAG_ITEM_DISC) ||
+				TAG_DISC) ||
 	    vorbis_copy_comment(tag, comment, "album artist",
-				TAG_ITEM_ALBUM_ARTIST))
+				TAG_ALBUM_ARTIST))
 		return;
 
 	for (unsigned i = 0; i < TAG_NUM_OF_ITEM_TYPES; ++i)
@@ -228,7 +253,7 @@ oggvorbis_seekable(struct decoder *decoder)
 	uri = decoder_get_uri(decoder);
 	/* disable seeking on remote streams, because libvorbis seeks
 	   around like crazy, and due to being very expensive, this
-	   delays song playback my 10 or 20 seconds */
+	   delays song playback by 10 or 20 seconds */
 	seekable = !uri_has_scheme(uri);
 	g_free(uri);
 
@@ -240,10 +265,12 @@ static void
 vorbis_stream_decode(struct decoder *decoder,
 		     struct input_stream *input_stream)
 {
+	GError *error = NULL;
 	OggVorbis_File vf;
 	ov_callbacks callbacks;
-	OggCallbackData data;
+	struct vorbis_decoder_data data;
 	struct audio_format audio_format;
+	float total_time;
 	int current_section;
 	int prev_section = -1;
 	long ret;
@@ -251,8 +278,7 @@ vorbis_stream_decode(struct decoder *decoder,
 	long bitRate = 0;
 	long test;
 	struct replay_gain_info *replay_gain_info = NULL;
-	char **comments;
-	bool initialized = false;
+	const vorbis_info *vi;
 	enum decoder_command cmd = DECODE_COMMAND_NONE;
 
 	if (ogg_stream_type_detect(input_stream) != VORBIS)
@@ -271,36 +297,32 @@ vorbis_stream_decode(struct decoder *decoder,
 	callbacks.close_func = ogg_close_cb;
 	callbacks.tell_func = ogg_tell_cb;
 	if ((ret = ov_open_callbacks(&data, &vf, NULL, 0, callbacks)) < 0) {
-		const char *error;
-
 		if (decoder_get_command(decoder) != DECODE_COMMAND_NONE)
 			return;
 
-		switch (ret) {
-		case OV_EREAD:
-			error = "read error";
-			break;
-		case OV_ENOTVORBIS:
-			error = "not vorbis stream";
-			break;
-		case OV_EVERSION:
-			error = "vorbis version mismatch";
-			break;
-		case OV_EBADHEADER:
-			error = "invalid vorbis header";
-			break;
-		case OV_EFAULT:
-			error = "internal logic error";
-			break;
-		default:
-			error = "unknown error";
-			break;
-		}
-
-		g_warning("Error decoding Ogg Vorbis stream: %s", error);
+		g_warning("Error decoding Ogg Vorbis stream: %s",
+			  vorbis_strerror(ret));
 		return;
 	}
-	audio_format.bits = 16;
+
+	vi = ov_info(&vf, -1);
+	if (vi == NULL) {
+		g_warning("ov_info() has failed");
+		return;
+	}
+
+	if (!audio_format_init_checked(&audio_format, vi->rate, 16,
+				       vi->channels, &error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
+		return;
+	}
+
+	total_time = ov_time_total(&vf, -1);
+	if (total_time < 0)
+		total_time = 0;
+
+	decoder_initialized(decoder, &audio_format, data.seekable, total_time);
 
 	do {
 		if (cmd == DECODE_COMMAND_SEEK) {
@@ -320,29 +342,23 @@ vorbis_stream_decode(struct decoder *decoder,
 			break;
 
 		if (current_section != prev_section) {
-			/*printf("new song!\n"); */
-			vorbis_info *vi = ov_info(&vf, -1);
+			char **comments;
 			struct replay_gain_info *new_rgi;
 
-			audio_format_init(&audio_format, vi->rate, 16, vi->channels);
-
-			if (!audio_format_valid(&audio_format)) {
-				g_warning("Invalid audio format: %u:%u:%u\n",
-					  audio_format.sample_rate,
-					  audio_format.bits,
-					  audio_format.channels);
+			vi = ov_info(&vf, -1);
+			if (vi == NULL) {
+				g_warning("ov_info() has failed");
 				break;
 			}
 
-			if (!initialized) {
-				float total_time = ov_time_total(&vf, -1);
-				if (total_time < 0)
-					total_time = 0;
-				decoder_initialized(decoder, &audio_format,
-						    data.seekable,
-						    total_time);
-				initialized = true;
+			if (vi->rate != (long)audio_format.sample_rate ||
+			    vi->channels != (int)audio_format.channels) {
+				/* we don't support audio format
+				   change yet */
+				g_warning("audio format change, stopping here");
+				break;
 			}
+
 			comments = ov_comment(&vf, -1)->user_comments;
 			vorbis_send_comments(decoder, input_stream, comments);
 			new_rgi = vorbis_comments_to_replay_gain(comments);
@@ -351,9 +367,9 @@ vorbis_stream_decode(struct decoder *decoder,
 					replay_gain_info_free(replay_gain_info);
 				replay_gain_info = new_rgi;
 			}
-		}
 
-		prev_section = current_section;
+			prev_section = current_section;
+		}
 
 		if ((test = ov_bitrate_instant(&vf)) > 0)
 			bitRate = test / 1000;
@@ -377,7 +393,7 @@ vorbis_tag_dup(const char *file)
 	FILE *fp;
 	OggVorbis_File vf;
 
-	fp = fopen(file, "r");
+	fp = fopen(file, "rb");
 	if (!fp) {
 		return NULL;
 	}

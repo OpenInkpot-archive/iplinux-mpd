@@ -17,10 +17,12 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../decoder_api.h"
+#include "config.h"
+#include "decoder_api.h"
 
 #include <glib.h>
 #include <mikmod.h>
+#include <assert.h>
 
 #undef G_LOG_DOMAIN
 #define G_LOG_DOMAIN "mikmod"
@@ -29,30 +31,34 @@
 
 #define MIKMOD_FRAME_SIZE	4096
 
-static BOOL mod_mpd_Init(void)
+static BOOL
+mikmod_mpd_init(void)
 {
 	return VC_Init();
 }
 
-static void mod_mpd_Exit(void)
+static void
+mikmod_mpd_exit(void)
 {
 	VC_Exit();
 }
 
-static void mod_mpd_Update(void)
+static void
+mikmod_mpd_update(void)
 {
 }
 
-static BOOL mod_mpd_IsThere(void)
+static BOOL
+mikmod_mpd_is_present(void)
 {
-	return 1;
+	return true;
 }
 
-static char drv_name[] = "MPD";
-static char drv_version[] = "MPD Output Driver v0.1";
+static char drv_name[] = PACKAGE_NAME;
+static char drv_version[] = VERSION;
 
 #if (LIBMIKMOD_VERSION > 0x030106)
-static char drv_alias[] = "mpd";
+static char drv_alias[] = PACKAGE;
 #endif
 
 static MDRIVER drv_mpd = {
@@ -68,18 +74,18 @@ static MDRIVER drv_mpd = {
 #endif
 	NULL,  /* CommandLine */
 #endif
-	mod_mpd_IsThere,
+	mikmod_mpd_is_present,
 	VC_SampleLoad,
 	VC_SampleUnload,
 	VC_SampleSpace,
 	VC_SampleLength,
-	mod_mpd_Init,
-	mod_mpd_Exit,
+	mikmod_mpd_init,
+	mikmod_mpd_exit,
 	NULL,
 	VC_SetNumVoices,
 	VC_PlayStart,
 	VC_PlayStop,
-	mod_mpd_Update,
+	mikmod_mpd_update,
 	NULL,
 	VC_VoiceSetVolume,
 	VC_VoiceGetVolume,
@@ -94,10 +100,19 @@ static MDRIVER drv_mpd = {
 	VC_VoiceRealVolume
 };
 
+static unsigned mikmod_sample_rate;
+
 static bool
-mod_initMikMod(G_GNUC_UNUSED const struct config_param *param)
+mikmod_decoder_init(const struct config_param *param)
 {
+	unsigned sample_rate;
 	static char params[] = "";
+
+	mikmod_sample_rate = config_get_block_unsigned(param, "sample_rate",
+						       44100);
+	if (!audio_valid_sample_rate(mikmod_sample_rate))
+		g_error("Invalid sample rate in line %d: %u",
+			param->line, sample_rate);
 
 	md_device = 0;
 	md_reverb = 0;
@@ -106,7 +121,7 @@ mod_initMikMod(G_GNUC_UNUSED const struct config_param *param)
 	MikMod_RegisterAllLoaders();
 
 	md_pansep = 64;
-	md_mixfreq = 44100;
+	md_mixfreq = mikmod_sample_rate;
 	md_mode = (DMODE_SOFT_MUSIC | DMODE_INTERP | DMODE_STEREO |
 		   DMODE_16BITS);
 
@@ -119,113 +134,88 @@ mod_initMikMod(G_GNUC_UNUSED const struct config_param *param)
 	return true;
 }
 
-static void mod_finishMikMod(void)
+static void
+mikmod_decoder_finish(void)
 {
 	MikMod_Exit();
 }
 
-typedef struct _mod_Data {
-	MODULE *moduleHandle;
-	SBYTE audio_buffer[MIKMOD_FRAME_SIZE];
-} mod_Data;
-
-static mod_Data *mod_open(const char *path)
+static void
+mikmod_decoder_file_decode(struct decoder *decoder, const char *path_fs)
 {
 	char *path2;
-	MODULE *moduleHandle;
-	mod_Data *data;
-
-	path2 = g_strdup(path);
-	moduleHandle = Player_Load(path2, 128, 0);
-	g_free(path2);
-
-	if (moduleHandle == NULL)
-		return NULL;
-
-	/* Prevent module from looping forever */
-	moduleHandle->loop = 0;
-
-	data = g_new(mod_Data, 1);
-	data->moduleHandle = moduleHandle;
-
-	Player_Start(data->moduleHandle);
-
-	return data;
-}
-
-static void mod_close(mod_Data * data)
-{
-	Player_Stop();
-	Player_Free(data->moduleHandle);
-	g_free(data);
-}
-
-static void
-mod_decode(struct decoder *decoder, const char *path)
-{
-	mod_Data *data;
+	MODULE *handle;
 	struct audio_format audio_format;
-	float total_time = 0.0;
 	int ret;
-	float secPerByte;
+	SBYTE buffer[MIKMOD_FRAME_SIZE];
+	unsigned frame_size, current_frame = 0;
 	enum decoder_command cmd = DECODE_COMMAND_NONE;
 
-	if (!(data = mod_open(path))) {
-		g_warning("failed to open mod: %s\n", path);
+	path2 = g_strdup(path_fs);
+	handle = Player_Load(path2, 128, 0);
+	g_free(path2);
+
+	if (handle == NULL) {
+		g_warning("failed to open mod: %s", path_fs);
 		return;
 	}
 
-	audio_format_init(&audio_format, 44100, 16, 2);
+	/* Prevent module from looping forever */
+	handle->loop = 0;
 
-	secPerByte =
-	    1.0 / ((audio_format.bits * audio_format.channels / 8.0) *
-		   (float)audio_format.sample_rate);
+	audio_format_init(&audio_format, mikmod_sample_rate, 16, 2);
+	assert(audio_format_valid(&audio_format));
 
 	decoder_initialized(decoder, &audio_format, false, 0);
 
+	frame_size = audio_format_frame_size(&audio_format);
+
+	Player_Start(handle);
 	while (cmd == DECODE_COMMAND_NONE && Player_Active()) {
-		ret = VC_WriteBytes(data->audio_buffer, MIKMOD_FRAME_SIZE);
-		total_time += ret * secPerByte;
-		cmd = decoder_data(decoder, NULL,
-				   data->audio_buffer, ret,
-				   total_time, 0, NULL);
+		ret = VC_WriteBytes(buffer, sizeof(buffer));
+		current_frame += ret / frame_size;
+		cmd = decoder_data(decoder, NULL, buffer, ret,
+				   (float)current_frame / (float)mikmod_sample_rate,
+				   0, NULL);
 	}
 
-	mod_close(data);
+	Player_Stop();
+	Player_Free(handle);
 }
 
-static struct tag *modTagDup(const char *file)
+static struct tag *
+mikmod_decoder_tag_dup(const char *path_fs)
 {
 	char *path2;
 	struct tag *ret = NULL;
-	MODULE *moduleHandle;
+	MODULE *handle;
 	char *title;
 
-	path2 = g_strdup(file);
-	moduleHandle = Player_Load(path2, 128, 0);
+	path2 = g_strdup(path_fs);
+	handle = Player_Load(path2, 128, 0);
 	g_free(path2);
 
-	if (moduleHandle == NULL) {
-		g_debug("Failed to open file: %s", file);
+	if (handle == NULL) {
+		g_debug("Failed to open file: %s", path_fs);
 		return NULL;
 
 	}
-	Player_Free(moduleHandle);
+	Player_Free(handle);
 
 	ret = tag_new();
 
 	ret->time = 0;
 
-	path2 = g_strdup(file);
+	path2 = g_strdup(path_fs);
 	title = g_strdup(Player_LoadTitle(path2));
 	g_free(path2);
 	if (title)
-		tag_add_item(ret, TAG_ITEM_TITLE, title);
+		tag_add_item(ret, TAG_TITLE, title);
 
 	return ret;
 }
 
-static const char *const modSuffixes[] = {
+static const char *const mikmod_decoder_suffixes[] = {
 	"amf",
 	"dsm",
 	"far",
@@ -246,9 +236,9 @@ static const char *const modSuffixes[] = {
 
 const struct decoder_plugin mikmod_decoder_plugin = {
 	.name = "mikmod",
-	.init = mod_initMikMod,
-	.finish = mod_finishMikMod,
-	.file_decode = mod_decode,
-	.tag_dup = modTagDup,
-	.suffixes = modSuffixes,
+	.init = mikmod_decoder_init,
+	.finish = mikmod_decoder_finish,
+	.file_decode = mikmod_decoder_file_decode,
+	.tag_dup = mikmod_decoder_tag_dup,
+	.suffixes = mikmod_decoder_suffixes,
 };

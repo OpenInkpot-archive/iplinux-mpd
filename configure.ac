@@ -1,7 +1,7 @@
 AC_PREREQ(2.60)
 AC_INIT(mpd, 0.16~git, musicpd-dev-team@lists.sourceforge.net)
 AC_CONFIG_SRCDIR([src/main.c])
-AM_INIT_AUTOMAKE([foreign 1.10 dist-bzip2])
+AM_INIT_AUTOMAKE([foreign 1.10 dist-bzip2 subdir-objects])
 AM_CONFIG_HEADER(config.h)
 AC_CONFIG_MACRO_DIR([m4])
 
@@ -100,6 +100,11 @@ dnl
 dnl libc features
 dnl
 
+AC_SYS_LARGEFILE
+if test x$enable_largefile != xno; then
+	AC_DEFINE([ENABLE_LARGEFILE], 1, [Define if large file support is enabled])
+fi
+
 AC_CHECK_FUNCS(daemon fork syslog)
 if test $ac_cv_func_syslog = no; then
 	# syslog is not in the default libraries.  See if it's in some other.
@@ -113,18 +118,34 @@ fi
 AC_CHECK_LIB(socket,socket,MPD_LIBS="$MPD_LIBS -lsocket",)
 AC_CHECK_LIB(nsl,gethostbyname,MPD_LIBS="$MPD_LIBS -lnsl",)
 
+AC_CHECK_FUNCS(pipe2 accept4)
+
 AC_CHECK_LIB(m,exp,MPD_LIBS="$MPD_LIBS -lm",)
 
 AC_CHECK_HEADERS(locale.h)
 AC_CHECK_HEADERS(valgrind/memcheck.h)
 
+AC_CHECK_FUNCS(inotify_init inotify_init1)
+AC_ARG_ENABLE(inotify,
+	AS_HELP_STRING([--disable-inotify],
+		[disable support Inotify automatic database update (default: enabled) ]),,
+	[enable_inotify=yes])
+
+if test x$ac_cv_func_inotify_init = xno; then
+	enable_inotify=no
+fi
+
+if test x$enable_inotify = xyes; then
+	AC_DEFINE([ENABLE_INOTIFY], 1, [Define to enable inotify support])
+fi
+AM_CONDITIONAL(ENABLE_INOTIFY, test x$enable_inotify = xyes)
 
 dnl
 dnl mandatory libraries
 dnl
 
-PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.6 gthread-2.0],,
-		[AC_MSG_ERROR([glib-2.6 is required])])
+PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.12 gthread-2.0],,
+		[AC_MSG_ERROR([GLib 2.12 is required])])
 
 
 dnl
@@ -268,6 +289,7 @@ fi
 AM_CONDITIONAL(ENABLE_SQLITE, test x$enable_sqlite = xyes)
 
 
+
 dnl
 dnl input plugins
 dnl
@@ -280,9 +302,9 @@ AC_ARG_ENABLE(curl,
 MPD_AUTO_PKG(curl, CURL, [libcurl],
 	[libcurl HTTP streaming], [libcurl not found])
 if test x$enable_curl = xyes; then
-	AC_DEFINE(HAVE_CURL, 1, [Define when libcurl is used for HTTP streaming])
+	AC_DEFINE(ENABLE_CURL, 1, [Define when libcurl is used for HTTP streaming])
 fi
-AM_CONDITIONAL(HAVE_CURL, test x$enable_curl = xyes)
+AM_CONDITIONAL(ENABLE_CURL, test x$enable_curl = xyes)
 
 AC_ARG_ENABLE(lastfm,
 	AS_HELP_STRING([--enable-lastfm],
@@ -303,7 +325,7 @@ AC_ARG_ENABLE(mms,
 		[enable the MMS protocol with libmms]),,
 	[enable_mms=auto])
 
-MPD_AUTO_PKG(mms, MMS, [libmms],
+MPD_AUTO_PKG(mms, MMS, [libmms >= 0.4],
 	[libmms mms:// protocol support], [libmms not found])
 if test x$enable_mms = xyes; then
 	AC_DEFINE(ENABLE_MMS, 1,
@@ -339,7 +361,7 @@ AC_ARG_ENABLE(zip,
 		[enable zip archive support (default: disabled)]),,
 	enable_zip=no)
 
-MPD_AUTO_PKG(zip, ZZIP, [zziplib],
+MPD_AUTO_PKG(zip, ZZIP, [zziplib >= 0.13],
 	[libzzip archive library], [libzzip not found])
 
 AM_CONDITIONAL(HAVE_ZIP, test x$enable_zip = xyes)
@@ -391,8 +413,8 @@ dnl
 
 AC_ARG_ENABLE(audiofile,
 	AS_HELP_STRING([--enable-audiofile],
-		[enable audiofile support, disables wave support]),,
-	enable_audiofile=yes)
+		[enable audiofile support (WAV and others)]),,
+	enable_audiofile=auto)
 
 MPD_AUTO_PKG(audiofile, AUDIOFILE, [audiofile >= 0.1.7],
 	[audiofile decoder plugin], [libaudiofile not found])
@@ -426,6 +448,18 @@ if test x$enable_mad = xyes; then
 	AC_DEFINE(HAVE_MAD, 1, [Define to use libmad])
 fi
 AM_CONDITIONAL(HAVE_MAD, test x$enable_mad = xyes)
+
+AC_ARG_ENABLE(mpg123,
+	AS_HELP_STRING([--enable-mpg123],
+		[enable libmpg123 decoder plugin]),,
+	enable_mpg123=auto)
+
+MPD_AUTO_PKG(mpg123, MPG123, [libmpg123],
+	[libmpg123 decoder plugin], [libmpg123 not found])
+if test x$enable_mpg123 = xyes; then
+	AC_DEFINE(HAVE_MPG123, 1, [Define to use libmpg123])
+fi
+AM_CONDITIONAL(HAVE_MPG123, test x$enable_mpg123 = xyes)
 
 AC_ARG_ENABLE(mikmod,
 	AS_HELP_STRING([--enable-mikmod],
@@ -542,12 +576,17 @@ if test x$enable_sidplay != xno; then
 	# library name triggers an autoconf bug
 	AC_CHECK_LIB(resid-builder, main,
 		[found_sidplay=yes], [found_sidplay=no])
+
+	if test x$found_sidplay = xyes; then
+		AC_HAVE_LIBRARY(sidutils,, [found_sidplay=no])
+	fi
+
 	MPD_AUTO_RESULT(sidplay, [sidplay decoder plugin],
-		[libresid-builder not found])
+		[libresid-builder or libsidutils not found])
 fi
 
 if test x$enable_sidplay = xyes; then
-	AC_SUBST(SIDPLAY_LIBS,"-lsidplay2 -lresid-builder")
+	AC_SUBST(SIDPLAY_LIBS,"-lsidplay2 -lresid-builder -lsidutils")
 	AC_SUBST(SIDPLAY_CFLAGS,)
 
 	AC_DEFINE(ENABLE_SIDPLAY, 1, [Define for libsidplay2 support])
@@ -623,6 +662,11 @@ AC_ARG_ENABLE(twolame-encoder,
 		[enable the TwoLAME mp2 encoder]),,
 	enable_twolame_encoder=auto)
 
+AC_ARG_ENABLE(wave-encoder,
+	AS_HELP_STRING([--enable-wave-encoder],
+		[enable the PCM wave encoder]),,
+	enable_wave_encoder=yes)
+
 
 dnl
 dnl audio output plugins
@@ -666,7 +710,7 @@ AC_ARG_ENABLE(jack,
 		[enable jack support]),,
 	enable_jack=auto)
 
-MPD_AUTO_PKG(jack, JACK, [jack >= 0.4],
+MPD_AUTO_PKG(jack, JACK, [jack >= 0.100],
 	[JACK output plugin], [libjack not found])
 if test x$enable_jack = xyes; then
 	AC_DEFINE([HAVE_JACK], 1, [Define to enable JACK support])
@@ -694,12 +738,17 @@ AC_ARG_ENABLE(oss,
 		[disable OSS support (default: enable)]),,
 	enable_oss=yes)
 
+AC_ARG_ENABLE(openal,
+	AS_HELP_STRING([--enable-openal],
+		[enable OpenAL support (default: disable)]),,
+	enable_openal=no)
+
 AC_ARG_ENABLE(pulse,
 	AS_HELP_STRING([--enable-pulse],
 		[enable support for the PulseAudio sound server]),,
 	enable_pulse=auto)
 
-MPD_AUTO_PKG(pulse, PULSE, [libpulse-simple],
+MPD_AUTO_PKG(pulse, PULSE, [libpulse],
 	[PulseAudio output plugin], [libpulse not found])
 if test x$enable_pulse = xyes; then
 	AC_DEFINE([HAVE_PULSE], 1,
@@ -707,6 +756,11 @@ if test x$enable_pulse = xyes; then
 fi
 
 AM_CONDITIONAL(HAVE_PULSE, test x$enable_pulse = xyes)
+
+AC_ARG_ENABLE(recorder-output,
+	AS_HELP_STRING([--enable-recorder-output],
+		[enables the recorder file output plugin (default: disable)]),,
+	[enable_recorder_output=auto])
 
 AC_ARG_ENABLE(httpd-output,
 	AS_HELP_STRING([--enable-httpd-output],
@@ -756,6 +810,29 @@ if test x$enable_oss = xyes; then
 fi
 
 AM_CONDITIONAL(HAVE_OSS, test x$enable_oss = xyes)
+
+if test x$enable_openal = xyes; then
+	if test x$enable_osx = xyes; then
+		AC_CHECK_HEADERS([OpenAL/al.h OpenAL/alc.h], [], [enable_openal=no])
+		if test x$enable_openal = xyes; then
+			OPENAL_LIBS="-framework OpenAL"
+			AC_DEFINE(HAVE_OPENAL, 1, [Define for OpenAL support])
+		else
+			AC_MSG_WARN(OpenAL headers not found -- disabling OpenAL support)
+		fi
+	else
+		PKG_CHECK_MODULES([OPENAL], [openal],
+			AC_DEFINE(HAVE_OPENAL, 1, [Define for OpenAL support]),
+			enable_openal=no)
+	fi
+fi
+
+if test x$enable_openal = xyes; then
+	MPD_CFLAGS="$MPD_CFLAGS $OPENAL_CFLAGS"
+	MPD_LIBS="$MPD_LIBS $OPENAL_LIBS"
+fi
+
+AM_CONDITIONAL(HAVE_OPENAL, test x$enable_openal = xyes)
 
 if test x$enable_fifo = xyes; then
 	AC_CHECK_FUNC([mkfifo],
@@ -912,6 +989,8 @@ fi
 
 AM_CONDITIONAL(HAVE_FLAC, test x$enable_flac = xyes)
 
+enable_flac_encoder=$enable_flac
+
 if test x$enable_oggflac = xyes; then
 	oldmpdcflags="$MPD_CFLAGS"
 	oldmpdlibs="$MPD_LIBS"
@@ -992,10 +1071,14 @@ dnl
 dnl Encoder API and shout/httpd output plugin
 dnl
 
-if test x$enable_shout = xyes || test x$enable_httpd_output = xyes; then
+if test x$enable_shout = xyes || \
+	test x$enable_recorder_output = xyes || \
+	test x$enable_httpd_output = xyes; then
 	# at least one output using encoders is explicitly enabled
 	need_encoder=yes
-elif test x$enable_shout = xauto || test x$enable_httpd_output = xauto; then
+elif test x$enable_shout = xauto || \
+	test x$enable_recorder_output = xauto || \
+	test x$enable_httpd_output = xauto; then
 	need_encoder=auto
 else
 	# all outputs using encoders are disabled
@@ -1005,6 +1088,8 @@ else
 	enable_vorbis_encoder=no
 	enable_lame_encoder=no
 	enable_twolame_encoder=no
+	enable_wave_encoder=no
+	enable_flac_encoder=no
 fi
 
 MPD_AUTO_PKG(vorbis_encoder, VORBISENC, [vorbisenc],
@@ -1024,7 +1109,9 @@ MPD_AUTO_PKG(twolame_encoder, TWOLAME, [twolame],
 
 if test x$enable_vorbis_encoder != xno ||
 	test x$enable_lame_encoder != xno ||
-	test x$enable_twolame_encoder != xno; then
+	test x$enable_twolame_encoder != xno ||
+	test x$enable_flac_encoder != xno ||
+	test x$enable_wave_encoder != xno; then
 	# at least one encoder plugin is enabled
 	enable_encoder=yes
 else
@@ -1048,6 +1135,17 @@ if test x$enable_shout = xauto; then
 	fi
 fi
 
+if test x$enable_recorder_output = xauto; then
+	# handle recorder auto-detection: disable if no encoder is
+	# available
+	if test x$enable_encoder = xyes; then
+		enable_recorder_output=yes
+	else
+		AC_MSG_WARN([No encoder plugin -- disabling the recorder output plugin])
+		enable_recorder_output=no
+	fi
+fi
+
 if test x$enable_httpd_output = xauto; then
 	# handle HTTPD auto-detection: disable if no encoder is
 	# available
@@ -1064,12 +1162,21 @@ if test x$enable_shout = xyes; then
 	AC_DEFINE(HAVE_SHOUT, 1, [Define to enable the shoutcast output])
 fi
 
+AM_CONDITIONAL(ENABLE_RECORDER_OUTPUT, test x$enable_recorder_output = xyes)
+if test x$enable_recorder_output = xyes; then
+	AC_DEFINE(ENABLE_RECORDER_OUTPUT, 1, [Define to enable the recorder output])
+fi
+
 AM_CONDITIONAL(ENABLE_HTTPD_OUTPUT, test x$enable_httpd_output = xyes)
 if test x$enable_httpd_output = xyes; then
 	AC_DEFINE(ENABLE_HTTPD_OUTPUT, 1, [Define to enable the HTTP server output])
 fi
 
 AM_CONDITIONAL(ENABLE_ENCODER, test x$enable_encoder = xyes)
+if test x$enable_encoder = xyes; then
+	AC_DEFINE(ENABLE_ENCODER, 1,
+		[Define to enable the encoder plugins])
+fi
 
 AM_CONDITIONAL(ENABLE_VORBIS_ENCODER, test x$enable_vorbis_encoder = xyes)
 if test x$enable_vorbis_encoder = xyes; then
@@ -1089,6 +1196,17 @@ if test x$enable_twolame_encoder = xyes; then
 		[Define to enable the TwoLAME encoder plugin])
 fi
 
+AM_CONDITIONAL(ENABLE_WAVE_ENCODER, test x$enable_wave_encoder = xyes)
+if test x$enable_wave_encoder = xyes; then
+	AC_DEFINE(ENABLE_WAVE_ENCODER, 1,
+		[Define to enable the PCM wave encoder plugin])
+fi
+
+AM_CONDITIONAL(ENABLE_FLAC_ENCODER, test x$enable_flac_encoder = xyes)
+if test x$enable_flac_encoder = xyes; then
+	AC_DEFINE(ENABLE_FLAC_ENCODER, 1,
+		[Define to enable the FLAC encoder plugin])
+fi
 
 dnl
 dnl Documentation
@@ -1225,6 +1343,12 @@ else
 	echo " FIFO support ..................disabled"
 fi
 
+if test x$enable_recorder_output = xyes; then
+	echo " File Recorder support .........enabled"
+else
+	echo " File Recorder support .........disabled"
+fi
+
 if test x$enable_httpd_output = xyes; then
 	echo " HTTP daemon support ...........enabled"
 else
@@ -1247,6 +1371,12 @@ if test x$enable_oss = xyes; then
 	echo " OSS support ...................enabled"
 else
 	echo " OSS support ...................disabled"
+fi
+
+if test x$enable_openal = xyes; then
+	echo " OpenAL support ................enabled"
+else
+	echo " OpenAL support ................disabled"
 fi
 
 if test x$enable_osx = xyes; then
@@ -1290,7 +1420,9 @@ echo ""
 if
 	test x$enable_ao = xno &&
 	test x$enable_oss = xno &&
+	test x$enable_openal = xno &&
 	test x$enable_shout = xno &&
+	test x$enable_recorder_output = xno &&
 	test x$enable_httpd_output = xno &&
 	test x$enable_solaris_output = xno &&
 	test x$enable_alsa = xno &&
@@ -1305,6 +1437,7 @@ fi
 
 if
 	test x$enable_shout = xyes ||
+	test x$enable_recorder = xyes ||
 	test x$enable_httpd_output = xyes; then
 		echo " Streaming Encoder Support:"
 		if test x$enable_lame_encoder = xyes; then
@@ -1323,6 +1456,18 @@ if
 			echo " TwoLAME mp3 encoder ...........enabled"
 		else
 			echo " TwoLAME mp3 encoder ...........disabled"
+		fi
+
+		if test x$enable_flac_encoder = xyes; then
+			echo " FLAC encoder ..................enabled"
+		else
+			echo " FLAC encoder ..................disabled"
+		fi
+
+		if test x$enable_wave_encoder = xyes; then
+			echo " PCM wave encoder ..............enabled"
+		else
+			echo " PCM wave encoder ..............disabled"
 		fi
 
 		echo ""
@@ -1376,6 +1521,12 @@ if test x$enable_mad = xyes; then
 	echo " MAD mp3 decoder support .......enabled"
 else
 	echo " MAD mp3 decoder support .......disabled"
+fi
+
+if test x$enable_mpg123 = xyes; then
+	echo " libmpg123 decoder support .....enabled"
+else
+	echo " libmpg123 decoder support .....disabled"
 fi
 
 if test x$enable_mp4 = xyes; then
@@ -1441,6 +1592,7 @@ fi
 
 if
 	test x$enable_mad = xno &&
+	test x$enable_mpg123 = xno &&
 	test x$enable_vorbis = xno &&
 	test x$enable_flac = xno && 
 	test x$enable_oggflac = xno &&
@@ -1525,6 +1677,12 @@ if test x$enable_cue = xyes; then
         echo " libcue support ................enabled"
 else
         echo " libcue support ................disabled"
+fi
+
+if test x$enable_inotify = xyes; then
+        echo " Inotify support (autoupdate) ..enabled"
+else
+        echo " Inotify support (autoupdate) ..disabled"
 fi
 
 echo ""

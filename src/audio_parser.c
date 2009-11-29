@@ -22,8 +22,10 @@
  *
  */
 
+#include "config.h"
 #include "audio_parser.h"
 #include "audio_format.h"
+#include "audio_check.h"
 
 #include <stdlib.h>
 
@@ -36,11 +38,88 @@ audio_parser_quark(void)
 	return g_quark_from_static_string("audio_parser");
 }
 
-bool
-audio_format_parse(struct audio_format *dest, const char *src, GError **error)
+static bool
+parse_sample_rate(const char *src, bool mask, uint32_t *sample_rate_r,
+		  const char **endptr_r, GError **error_r)
 {
-	char *endptr;
 	unsigned long value;
+	char *endptr;
+
+	if (mask && *src == '*') {
+		*sample_rate_r = 0;
+		*endptr_r = src + 1;
+		return true;
+	}
+
+	value = strtoul(src, &endptr, 10);
+	if (endptr == src) {
+		g_set_error(error_r, audio_parser_quark(), 0,
+			    "Failed to parse the sample rate");
+		return false;
+	} else if (!audio_check_sample_rate(value, error_r))
+		return false;
+
+	*sample_rate_r = value;
+	*endptr_r = endptr;
+	return true;
+}
+
+static bool
+parse_sample_format(const char *src, bool mask, uint8_t *bits_r,
+		    const char **endptr_r, GError **error_r)
+{
+	unsigned long value;
+	char *endptr;
+
+	if (mask && *src == '*') {
+		*bits_r = 0;
+		*endptr_r = src + 1;
+		return true;
+	}
+
+	value = strtoul(src, &endptr, 10);
+	if (endptr == src) {
+		g_set_error(error_r, audio_parser_quark(), 0,
+			    "Failed to parse the sample format");
+		return false;
+	} else if (!audio_check_sample_format(value, error_r))
+		return false;
+
+	*bits_r = value;
+	*endptr_r = endptr;
+	return true;
+}
+
+static bool
+parse_channel_count(const char *src, bool mask, uint8_t *channels_r,
+		    const char **endptr_r, GError **error_r)
+{
+	unsigned long value;
+	char *endptr;
+
+	if (mask && *src == '*') {
+		*channels_r = 0;
+		*endptr_r = src + 1;
+		return true;
+	}
+
+	value = strtoul(src, &endptr, 10);
+	if (endptr == src) {
+		g_set_error(error_r, audio_parser_quark(), 0,
+			    "Failed to parse the channel count");
+		return false;
+	} else if (!audio_check_channel_count(value, error_r))
+		return false;
+
+	*channels_r = value;
+	*endptr_r = endptr;
+	return true;
+}
+
+bool
+audio_format_parse(struct audio_format *dest, const char *src,
+		   bool mask, GError **error_r)
+{
 	uint32_t rate;
 	uint8_t bits, channels;
 
@@ -48,54 +127,36 @@ audio_format_parse(struct audio_format *dest, const char *src, GError **error)
 
 	/* parse sample rate */
 
-	value = strtoul(src, &endptr, 10);
-	if (endptr == src) {
-		g_set_error(error, audio_parser_quark(), 0,
-			    "Sample rate missing");
+	if (!parse_sample_rate(src, mask, &rate, &src, error_r))
 		return false;
-	} else if (*endptr != ':') {
-		g_set_error(error, audio_parser_quark(), 0,
+
+	if (*src++ != ':') {
+		g_set_error(error_r, audio_parser_quark(), 0,
 			    "Sample format missing");
 		return false;
-	} else if (!audio_valid_sample_rate(value)) {
-		g_set_error(error, audio_parser_quark(), 0,
-			    "Invalid sample rate: %lu", value);
-		return false;
 	}
-
-	rate = value;
 
 	/* parse sample format */
 
-	src = endptr + 1;
-	value = strtoul(src, &endptr, 10);
-	if (endptr == src) {
-		g_set_error(error, audio_parser_quark(), 0,
-			    "Sample format missing");
+	if (!parse_sample_format(src, mask, &bits, &src, error_r))
 		return false;
-	} else if (*endptr != ':') {
-		g_set_error(error, audio_parser_quark(), 0,
+
+	if (*src++ != ':') {
+		g_set_error(error_r, audio_parser_quark(), 0,
 			    "Channel count missing");
 		return false;
-	} else if (!audio_valid_sample_format(value)) {
-		g_set_error(error, audio_parser_quark(), 0,
-			    "Invalid sample format: %lu", value);
-		return false;
 	}
-
-	bits = value;
 
 	/* parse channel count */
 
-	src = endptr + 1;
-	value = strtoul(src, &endptr, 10);
-	if (*endptr != 0 || !audio_valid_channel_count(value)) {
-		g_set_error(error, audio_parser_quark(), 0,
-			    "Invalid channel count: %s", src);
+	if (!parse_channel_count(src, mask, &channels, &src, error_r))
+		return false;
+
+	if (*src != 0) {
+		g_set_error(error_r, audio_parser_quark(), 0,
+			    "Extra data after channel count: %s", src);
 		return false;
 	}
-
-	channels = value;
 
 	audio_format_init(dest, rate, bits, channels);
 

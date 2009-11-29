@@ -17,8 +17,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../decoder_api.h"
 #include "config.h"
+#include "decoder_api.h"
+#include "audio_check.h"
 
 #include <glib.h>
 
@@ -209,6 +210,21 @@ ffmpeg_helper(struct input_stream *input,
 	return ret;
 }
 
+/**
+ * On some platforms, libavcodec wants the output buffer aligned to 16
+ * bytes (because it uses SSE/Altivec internally).  This function
+ * returns the aligned version of the specified buffer, and corrects
+ * the buffer size.
+ */
+static void *
+align16(void *p, size_t *length_p)
+{
+	unsigned add = 16 - (size_t)p % 16;
+
+	*length_p -= add;
+	return (char *)p + add;
+}
+
 static enum decoder_command
 ffmpeg_send_packet(struct decoder *decoder, struct input_stream *is,
 		   const AVPacket *packet,
@@ -217,7 +233,9 @@ ffmpeg_send_packet(struct decoder *decoder, struct input_stream *is,
 {
 	enum decoder_command cmd = DECODE_COMMAND_NONE;
 	int position;
-	uint8_t audio_buf[(AVCODEC_MAX_AUDIO_FRAME_SIZE * 3) / 2];
+	uint8_t audio_buf[(AVCODEC_MAX_AUDIO_FRAME_SIZE * 3) / 2 + 16];
+	int16_t *aligned_buffer;
+	size_t buffer_size;
 	int len, audio_size;
 	uint8_t *packet_data;
 	int packet_size;
@@ -225,11 +243,13 @@ ffmpeg_send_packet(struct decoder *decoder, struct input_stream *is,
 	packet_data = packet->data;
 	packet_size = packet->size;
 
+	buffer_size = sizeof(audio_buf);
+	aligned_buffer = align16(audio_buf, &buffer_size);
+
 	while ((packet_size > 0) && (cmd == DECODE_COMMAND_NONE)) {
-		audio_size = sizeof(audio_buf);
+		audio_size = buffer_size;
 		len = avcodec_decode_audio2(codec_context,
-					    (int16_t *)audio_buf,
-					    &audio_size,
+					    aligned_buffer, &audio_size,
 					    packet_data, packet_size);
 
 		if (len < 0) {
@@ -250,7 +270,7 @@ ffmpeg_send_packet(struct decoder *decoder, struct input_stream *is,
 			: 0;
 
 		cmd = decoder_data(decoder, is,
-				   audio_buf, audio_size,
+				   aligned_buffer, audio_size,
 				   position,
 				   codec_context->bit_rate / 1000, NULL);
 	}
@@ -260,6 +280,7 @@ ffmpeg_send_packet(struct decoder *decoder, struct input_stream *is,
 static bool
 ffmpeg_decode_internal(struct ffmpeg_context *ctx)
 {
+	GError *error = NULL;
 	struct decoder *decoder = ctx->decoder;
 	AVCodecContext *codec_context = ctx->codec_context;
 	AVFormatContext *format_context = ctx->format_context;
@@ -281,13 +302,11 @@ ffmpeg_decode_internal(struct ffmpeg_context *ctx)
 	/* XXX fixme 16-bit for older ffmpeg (13 Aug 2007) */
 	bits = (uint8_t) 16;
 #endif
-	audio_format_init(&audio_format, codec_context->sample_rate, bits,
-			  codec_context->channels);
-
-	if (!audio_format_valid(&audio_format)) {
-		g_warning("Invalid audio format: %u:%u:%u\n",
-			  audio_format.sample_rate, audio_format.bits,
-			  audio_format.channels);
+	if (!audio_format_init_checked(&audio_format,
+				       codec_context->sample_rate, bits,
+				       codec_context->channels, &error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
 		return false;
 	}
 
@@ -339,7 +358,7 @@ ffmpeg_decode(struct decoder *decoder, struct input_stream *input)
 }
 
 #if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(31<<8)+0)
-static void
+static bool
 ffmpeg_copy_metadata(struct tag *tag, AVMetadata *m,
 		     enum tag_type type, const char *name)
 {
@@ -347,6 +366,7 @@ ffmpeg_copy_metadata(struct tag *tag, AVMetadata *m,
 
 	while ((mt = av_metadata_get(m, name, mt, 0)) != NULL)
 		tag_add_item(tag, type, mt->value);
+	return mt != NULL;
 }
 #endif
 
@@ -362,35 +382,35 @@ static bool ffmpeg_tag_internal(struct ffmpeg_context *ctx)
 #if LIBAVFORMAT_VERSION_INT >= ((52<<16)+(31<<8)+0)
 	av_metadata_conv(f, NULL, f->iformat->metadata_conv);
 
-	ffmpeg_copy_metadata(tag, f->metadata, TAG_ITEM_TITLE, "title");
-	ffmpeg_copy_metadata(tag, f->metadata, TAG_ITEM_ARTIST, "author");
-	ffmpeg_copy_metadata(tag, f->metadata, TAG_ITEM_ALBUM, "album");
-	ffmpeg_copy_metadata(tag, f->metadata, TAG_ITEM_COMMENT, "comment");
-	ffmpeg_copy_metadata(tag, f->metadata, TAG_ITEM_GENRE, "genre");
-	ffmpeg_copy_metadata(tag, f->metadata, TAG_ITEM_TRACK, "track");
-	ffmpeg_copy_metadata(tag, f->metadata, TAG_ITEM_DATE, "year");
+	ffmpeg_copy_metadata(tag, f->metadata, TAG_TITLE, "title");
+	ffmpeg_copy_metadata(tag, f->metadata, TAG_ARTIST, "author");
+	ffmpeg_copy_metadata(tag, f->metadata, TAG_ALBUM, "album");
+	ffmpeg_copy_metadata(tag, f->metadata, TAG_COMMENT, "comment");
+	ffmpeg_copy_metadata(tag, f->metadata, TAG_GENRE, "genre");
+	ffmpeg_copy_metadata(tag, f->metadata, TAG_TRACK, "track");
+	ffmpeg_copy_metadata(tag, f->metadata, TAG_DATE, "year");
 #else
 	if (f->author[0])
-		tag_add_item(tag, TAG_ITEM_ARTIST, f->author);
+		tag_add_item(tag, TAG_ARTIST, f->author);
 	if (f->title[0])
-		tag_add_item(tag, TAG_ITEM_TITLE, f->title);
+		tag_add_item(tag, TAG_TITLE, f->title);
 	if (f->album[0])
-		tag_add_item(tag, TAG_ITEM_ALBUM, f->album);
+		tag_add_item(tag, TAG_ALBUM, f->album);
 
 	if (f->track > 0) {
 		char buffer[16];
 		snprintf(buffer, sizeof(buffer), "%d", f->track);
-		tag_add_item(tag, TAG_ITEM_TRACK, buffer);
+		tag_add_item(tag, TAG_TRACK, buffer);
 	}
 
 	if (f->comment[0])
-		tag_add_item(tag, TAG_ITEM_COMMENT, f->comment);
+		tag_add_item(tag, TAG_COMMENT, f->comment);
 	if (f->genre[0])
-		tag_add_item(tag, TAG_ITEM_GENRE, f->genre);
+		tag_add_item(tag, TAG_GENRE, f->genre);
 	if (f->year > 0) {
 		char buffer[16];
 		snprintf(buffer, sizeof(buffer), "%d", f->year);
-		tag_add_item(tag, TAG_ITEM_DATE, buffer);
+		tag_add_item(tag, TAG_DATE, buffer);
 	}
 
 #endif

@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "httpd_internal.h"
 #include "httpd_client.h"
 #include "output_api.h"
@@ -25,6 +26,7 @@
 #include "socket_util.h"
 #include "page.h"
 #include "icy_server.h"
+#include "fd_util.h"
 
 #include <assert.h>
 
@@ -44,6 +46,52 @@ static inline GQuark
 httpd_output_quark(void)
 {
 	return g_quark_from_static_string("httpd_output");
+}
+
+static gboolean
+httpd_listen_in_event(G_GNUC_UNUSED GIOChannel *source,
+		      G_GNUC_UNUSED GIOCondition condition,
+		      gpointer data);
+
+static bool
+httpd_output_bind(struct httpd_output *httpd, GError **error_r)
+{
+	GIOChannel *channel;
+
+	httpd->open = false;
+
+	/* create and set up listener socket */
+
+	httpd->fd = socket_bind_listen(PF_INET, SOCK_STREAM, 0,
+				       (struct sockaddr *)&httpd->address,
+				       httpd->address_size,
+				       16, error_r);
+	if (httpd->fd < 0)
+		return false;
+
+	g_mutex_lock(httpd->mutex);
+
+	channel = g_io_channel_unix_new(httpd->fd);
+	httpd->source_id = g_io_add_watch(channel, G_IO_IN,
+					  httpd_listen_in_event, httpd);
+	g_io_channel_unref(channel);
+
+	g_mutex_unlock(httpd->mutex);
+
+	return true;
+}
+
+static void
+httpd_output_unbind(struct httpd_output *httpd)
+{
+	assert(!httpd->open);
+
+	g_mutex_lock(httpd->mutex);
+
+	g_source_remove(httpd->source_id);
+	close(httpd->fd);
+
+	g_mutex_unlock(httpd->mutex);
 }
 
 static void *
@@ -75,6 +123,8 @@ httpd_output_init(G_GNUC_UNUSED const struct audio_format *audio_format,
 		httpd->content_type = "audio/mpeg";
 	else
 		httpd->content_type = "application/octet-stream";
+
+	httpd->clients_max = config_get_block_unsigned(param,"max_clients", 0);
 
 	/* initialize listen address */
 
@@ -124,6 +174,7 @@ httpd_client_add(struct httpd_output *httpd, int fd)
 				 httpd->encoder->plugin->tag == NULL);
 
 	httpd->clients = g_list_prepend(httpd->clients, client);
+	httpd->clients_cnt++;
 
 	/* pass metadata to client */
 	if (httpd->metadata)
@@ -138,18 +189,26 @@ httpd_listen_in_event(G_GNUC_UNUSED GIOChannel *source,
 	struct httpd_output *httpd = data;
 	int fd;
 	struct sockaddr_storage sa;
-	socklen_t sa_length = sizeof(sa);
+	size_t sa_length = sizeof(sa);
 
 	g_mutex_lock(httpd->mutex);
 
 	/* the listener socket has become readable - a client has
 	   connected */
 
-	fd = accept(httpd->fd, (struct sockaddr*)&sa, &sa_length);
-	if (fd >= 0)
-		httpd_client_add(httpd, fd);
-	else if (fd < 0 && errno != EINTR)
+	fd = accept_cloexec_nonblock(httpd->fd, (struct sockaddr*)&sa,
+				     &sa_length);
+	if (fd >= 0) {
+		/* can we allow additional client */
+		if (httpd->open &&
+		    (httpd->clients_max == 0 ||
+		     httpd->clients_cnt < httpd->clients_max))
+			httpd_client_add(httpd, fd);
+		else
+			close(fd);
+	} else if (fd < 0 && errno != EINTR) {
 		g_warning("accept() failed: %s", g_strerror(errno));
+	}
 
 	g_mutex_unlock(httpd->mutex);
 
@@ -199,30 +258,29 @@ httpd_output_encoder_open(struct httpd_output *httpd,
 }
 
 static bool
+httpd_output_enable(void *data, GError **error_r)
+{
+	struct httpd_output *httpd = data;
+
+	return httpd_output_bind(httpd, error_r);
+}
+
+static void
+httpd_output_disable(void *data)
+{
+	struct httpd_output *httpd = data;
+
+	httpd_output_unbind(httpd);
+}
+
+static bool
 httpd_output_open(void *data, struct audio_format *audio_format,
 		  GError **error)
 {
 	struct httpd_output *httpd = data;
 	bool success;
-	GIOChannel *channel;
 
 	g_mutex_lock(httpd->mutex);
-
-	/* create and set up listener socket */
-
-	httpd->fd = socket_bind_listen(PF_INET, SOCK_STREAM, 0,
-				       (struct sockaddr *)&httpd->address,
-				       httpd->address_size,
-				       16, error);
-	if (httpd->fd < 0) {
-		g_mutex_unlock(httpd->mutex);
-		return false;
-	}
-
-	channel = g_io_channel_unix_new(httpd->fd);
-	httpd->source_id = g_io_add_watch(channel, G_IO_IN,
-					  httpd_listen_in_event, httpd);
-	g_io_channel_unref(channel);
 
 	/* open the encoder */
 
@@ -237,7 +295,10 @@ httpd_output_open(void *data, struct audio_format *audio_format,
 	/* initialize other attributes */
 
 	httpd->clients = NULL;
+	httpd->clients_cnt = 0;
 	httpd->timer = timer_new(audio_format);
+
+	httpd->open = true;
 
 	g_mutex_unlock(httpd->mutex);
 	return true;
@@ -257,6 +318,8 @@ static void httpd_output_close(void *data)
 
 	g_mutex_lock(httpd->mutex);
 
+	httpd->open = false;
+
 	timer_free(httpd->timer);
 
 	g_list_foreach(httpd->clients, httpd_client_delete, NULL);
@@ -266,9 +329,6 @@ static void httpd_output_close(void *data)
 		page_unref(httpd->header);
 
 	encoder_close(httpd->encoder);
-
-	g_source_remove(httpd->source_id);
-	close(httpd->fd);
 
 	g_mutex_unlock(httpd->mutex);
 }
@@ -281,6 +341,7 @@ httpd_output_remove_client(struct httpd_output *httpd,
 	assert(client != NULL);
 
 	httpd->clients = g_list_remove(httpd->clients, client);
+	httpd->clients_cnt--;
 }
 
 void
@@ -433,9 +494,8 @@ httpd_output_tag(void *data, const struct tag *tag)
 			page_unref (httpd->metadata);
 
 		httpd->metadata =
-			icy_server_metadata_page(tag, TAG_ITEM_ALBUM,
-						 TAG_ITEM_ARTIST,
-						 TAG_ITEM_TITLE,
+			icy_server_metadata_page(tag, TAG_ALBUM,
+						 TAG_ARTIST, TAG_TITLE,
 						 TAG_NUM_OF_ITEM_TYPES);
 		if (httpd->metadata != NULL) {
 			g_mutex_lock(httpd->mutex);
@@ -468,6 +528,8 @@ const struct audio_output_plugin httpd_output_plugin = {
 	.name = "httpd",
 	.init = httpd_output_init,
 	.finish = httpd_output_finish,
+	.enable = httpd_output_enable,
+	.disable = httpd_output_disable,
 	.open = httpd_output_open,
 	.close = httpd_output_close,
 	.send_tag = httpd_output_tag,

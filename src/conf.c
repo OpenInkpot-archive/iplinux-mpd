@@ -17,10 +17,12 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "conf.h"
 #include "utils.h"
 #include "tokenizer.h"
 #include "path.h"
+#include "glib_compat.h"
 
 #include <glib.h>
 
@@ -53,7 +55,6 @@ static struct config_entry config_entries[] = {
 	{ .name = CONF_DB_FILE, false, false },
 	{ .name = CONF_STICKER_FILE, false, false },
 	{ .name = CONF_LOG_FILE, false, false },
-	{ .name = CONF_ERROR_FILE, false, false },
 	{ .name = CONF_PID_FILE, false, false },
 	{ .name = CONF_STATE_FILE, false, false },
 	{ .name = CONF_USER, false, false },
@@ -91,18 +92,10 @@ static struct config_entry config_entries[] = {
 	{ .name = CONF_DECODER, true, true },
 	{ .name = CONF_INPUT, true, true },
 	{ .name = CONF_GAPLESS_MP3_PLAYBACK, false, false },
+	{ .name = CONF_PLAYLIST_PLUGIN, true, true },
+	{ .name = CONF_AUTO_UPDATE, false, false },
 	{ .name = "filter", true, true },
 };
-
-static bool
-string_array_contains(const char *const* array, const char *value)
-{
-	for (const char *const* x = array; *x; x++)
-		if (g_ascii_strcasecmp(*x, value) == 0)
-			return true;
-
-	return false;
-}
 
 static bool
 get_bool(const char *value, bool *value_r)
@@ -143,10 +136,8 @@ config_new_param(const char *value, int line)
 }
 
 static void
-config_param_free(gpointer data, G_GNUC_UNUSED gpointer user_data)
+config_param_free(struct config_param *param)
 {
-	struct config_param *param = data;
-
 	g_free(param->value);
 
 	for (unsigned i = 0; i < param->num_block_params; i++) {
@@ -158,6 +149,14 @@ config_param_free(gpointer data, G_GNUC_UNUSED gpointer user_data)
 		g_free(param->block_params);
 
 	g_free(param);
+}
+
+static void
+config_param_free_callback(gpointer data, G_GNUC_UNUSED gpointer user_data)
+{
+	struct config_param *param = data;
+
+	config_param_free(param);
 }
 
 static struct config_entry *
@@ -177,7 +176,8 @@ void config_global_finish(void)
 	for (unsigned i = 0; i < G_N_ELEMENTS(config_entries); ++i) {
 		struct config_entry *entry = &config_entries[i];
 
-		g_slist_foreach(entry->params, config_param_free, NULL);
+		g_slist_foreach(entry->params,
+				config_param_free_callback, NULL);
 		g_slist_free(entry->params);
 	}
 }
@@ -215,17 +215,20 @@ void config_global_check(void)
 	}
 }
 
-void
+bool
 config_add_block_param(struct config_param * param, const char *name,
-		       const char *value, int line)
+		       const char *value, int line, GError **error_r)
 {
 	struct block_param *bp;
 
 	bp = config_get_block_param(param, name);
-	if (bp != NULL)
-		g_error("\"%s\" first defined on line %i, and "
-			"redefined on line %i\n", name,
-			bp->line, line);
+	if (bp != NULL) {
+		g_set_error(error_r, config_quark(), 0,
+			    "\"%s\" first defined on line %i, and "
+			    "redefined on line %i\n", name,
+			    bp->line, line);
+		return false;
+	}
 
 	param->num_block_params++;
 
@@ -239,21 +242,28 @@ config_add_block_param(struct config_param * param, const char *name,
 	bp->value = g_strdup(value);
 	bp->line = line;
 	bp->used = false;
+
+	return true;
 }
 
 static struct config_param *
-config_read_block(FILE *fp, int *count, char *string)
+config_read_block(FILE *fp, int *count, char *string, GError **error_r)
 {
 	struct config_param *ret = config_new_param(NULL, *count);
+	GError *error = NULL;
+	bool success;
 
 	while (true) {
 		char *line;
 		const char *name, *value;
-		GError *error = NULL;
 
 		line = fgets(string, MAX_STRING_SIZE, fp);
-		if (line == NULL)
-			g_error("Expected '}' before end-of-file");
+		if (line == NULL) {
+			config_param_free(ret);
+			g_set_error(error_r, config_quark(), 0,
+				    "Expected '}' before end-of-file");
+			return NULL;
+		}
 
 		(*count)++;
 		line = g_strchug(line);
@@ -265,9 +275,13 @@ config_read_block(FILE *fp, int *count, char *string)
 			   (and from this "while" loop) */
 
 			line = g_strchug(line + 1);
-			if (*line != 0 && *line != CONF_COMMENT)
-				g_error("line %i: Unknown tokens after '}'",
-					*count);
+			if (*line != 0 && *line != CONF_COMMENT) {
+				config_param_free(ret);
+				g_set_error(error_r, config_quark(), 0,
+					    "line %i: Unknown tokens after '}'",
+					    *count);
+				return false;
+			}
 
 			return ret;
 		}
@@ -277,25 +291,44 @@ config_read_block(FILE *fp, int *count, char *string)
 		name = tokenizer_next_word(&line, &error);
 		if (name == NULL) {
 			assert(*line != 0);
-			g_error("line %i: %s", *count, error->message);
+			config_param_free(ret);
+			g_propagate_prefixed_error(error_r, error,
+						   "line %i: ", *count);
+			return NULL;
 		}
 
 		value = tokenizer_next_string(&line, &error);
 		if (value == NULL) {
+			config_param_free(ret);
 			if (*line == 0)
-				g_error("line %i: Value missing", *count);
+				g_set_error(error_r, config_quark(), 0,
+					    "line %i: Value missing", *count);
 			else
-				g_error("line %i: %s", *count, error->message);
+				g_propagate_prefixed_error(error_r, error,
+							   "line %i: ",
+							   *count);
+			return NULL;
 		}
 
-		if (*line != 0 && *line != CONF_COMMENT)
-			g_error("line %i: Unknown tokens after value", *count);
+		if (*line != 0 && *line != CONF_COMMENT) {
+			config_param_free(ret);
+			g_set_error(error_r, config_quark(), 0,
+				    "line %i: Unknown tokens after value",
+				    *count);
+			return NULL;
+		}
 
-		config_add_block_param(ret, name, value, *count);
+		success = config_add_block_param(ret, name, value, *count,
+						 error_r);
+		if (!success) {
+			config_param_free(ret);
+			return false;
+		}
 	}
 }
 
-void config_read_file(const char *file)
+bool
+config_read_file(const char *file, GError **error_r)
 {
 	FILE *fp;
 	char string[MAX_STRING_SIZE + 1];
@@ -306,8 +339,10 @@ void config_read_file(const char *file)
 	g_debug("loading file %s", file);
 
 	if (!(fp = fopen(file, "r"))) {
-		g_error("problems opening file %s for reading: %s\n",
-			file, strerror(errno));
+		g_set_error(error_r, config_quark(), errno,
+			    "Failed to open %s: %s",
+			    file, strerror(errno));
+		return false;
 	}
 
 	while (fgets(string, MAX_STRING_SIZE, fp)) {
@@ -327,22 +362,29 @@ void config_read_file(const char *file)
 		name = tokenizer_next_word(&line, &error);
 		if (name == NULL) {
 			assert(*line != 0);
-			g_error("line %i: %s", count, error->message);
+			g_propagate_prefixed_error(error_r, error,
+						   "line %i: ", count);
+			return false;
 		}
 
 		/* get the definition of that option, and check the
 		   "repeatable" flag */
 
 		entry = config_entry_get(name);
-		if (entry == NULL)
-			g_error("unrecognized parameter in config file at "
-				"line %i: %s\n", count, name);
+		if (entry == NULL) {
+			g_set_error(error_r, config_quark(), 0,
+				    "unrecognized parameter in config file at "
+				    "line %i: %s\n", count, name);
+			return false;
+		}
 
 		if (entry->params != NULL && !entry->repeatable) {
 			param = entry->params->data;
-			g_error("config parameter \"%s\" is first defined on "
-				"line %i and redefined on line %i\n",
-				name, param->line, count);
+			g_set_error(error_r, config_quark(), 0,
+				    "config parameter \"%s\" is first defined "
+				    "on line %i and redefined on line %i\n",
+				    name, param->line, count);
+			return false;
 		}
 
 		/* now parse the block or the value */
@@ -350,31 +392,48 @@ void config_read_file(const char *file)
 		if (entry->block) {
 			/* it's a block, call config_read_block() */
 
-			if (*line != '{')
-				g_error("line %i: '{' expected", count);
+			if (*line != '{') {
+				g_set_error(error_r, config_quark(), 0,
+					    "line %i: '{' expected", count);
+				return false;
+			}
 
 			line = g_strchug(line + 1);
-			if (*line != 0 && *line != CONF_COMMENT)
-				g_error("line %i: Unknown tokens after '{'",
-					count);
+			if (*line != 0 && *line != CONF_COMMENT) {
+				g_set_error(error_r, config_quark(), 0,
+					    "line %i: Unknown tokens after '{'",
+					    count);
+				return false;
+			}
 
-			param = config_read_block(fp, &count, string);
+			param = config_read_block(fp, &count, string, error_r);
+			if (param == NULL)
+				return false;
 		} else {
 			/* a string value */
 
 			value = tokenizer_next_string(&line, &error);
 			if (value == NULL) {
 				if (*line == 0)
-					g_error("line %i: Value missing",
-						count);
-				else
-					g_error("line %i: %s", count,
-						error->message);
+					g_set_error(error_r, config_quark(), 0,
+						    "line %i: Value missing",
+						    count);
+				else {
+					g_set_error(error_r, config_quark(), 0,
+						    "line %i: %s", count,
+						    error->message);
+					g_error_free(error);
+				}
+
+				return false;
 			}
 
-			if (*line != 0 && *line != CONF_COMMENT)
-				g_error("line %i: Unknown tokens after value",
-					count);
+			if (*line != 0 && *line != CONF_COMMENT) {
+				g_set_error(error_r, config_quark(), 0,
+					    "line %i: Unknown tokens after value",
+					    count);
+				return false;
+			}
 
 			param = config_new_param(value, count);
 		}
@@ -382,6 +441,8 @@ void config_read_file(const char *file)
 		entry->params = g_slist_append(entry->params, param);
 	}
 	fclose(fp);
+
+	return true;
 }
 
 struct config_param *

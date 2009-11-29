@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "decoder_list.h"
 #include "decoder_api.h"
 #include "input_stream.h"
@@ -24,7 +25,7 @@
 #include "pcm_volume.h"
 #include "tag_ape.h"
 #include "tag_id3.h"
-#include "config.h"
+#include "idle.h"
 
 #include <glib.h>
 
@@ -34,6 +35,14 @@
 #ifdef HAVE_LOCALE_H
 #include <locale.h>
 #endif
+
+/**
+ * No-op dummy.
+ */
+void
+idle_add(G_GNUC_UNUSED unsigned flags)
+{
+}
 
 /**
  * No-op dummy.

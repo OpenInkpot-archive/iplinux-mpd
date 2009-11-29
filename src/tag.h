@@ -31,20 +31,20 @@
  * Codes for the type of a tag item.
  */
 enum tag_type {
-	TAG_ITEM_ARTIST,
+	TAG_ARTIST,
 	TAG_ARTIST_SORT,
-	TAG_ITEM_ALBUM,
-	TAG_ITEM_ALBUM_ARTIST,
+	TAG_ALBUM,
+	TAG_ALBUM_ARTIST,
 	TAG_ALBUM_ARTIST_SORT,
-	TAG_ITEM_TITLE,
-	TAG_ITEM_TRACK,
-	TAG_ITEM_NAME,
-	TAG_ITEM_GENRE,
-	TAG_ITEM_DATE,
-	TAG_ITEM_COMPOSER,
-	TAG_ITEM_PERFORMER,
-	TAG_ITEM_COMMENT,
-	TAG_ITEM_DISC,
+	TAG_TITLE,
+	TAG_TRACK,
+	TAG_NAME,
+	TAG_GENRE,
+	TAG_DATE,
+	TAG_COMPOSER,
+	TAG_PERFORMER,
+	TAG_COMMENT,
+	TAG_DISC,
 
 	TAG_MUSICBRAINZ_ARTISTID,
 	TAG_MUSICBRAINZ_ALBUMID,
@@ -94,6 +94,22 @@ struct tag {
 	/** the total number of tag items in the #items array */
 	unsigned num_items;
 };
+
+/**
+ * Parse the string, and convert it into a #tag_type.  Returns
+ * #TAG_NUM_OF_ITEM_TYPES if the string could not be recognized.
+ */
+enum tag_type
+tag_name_parse(const char *name);
+
+/**
+ * Parse the string, and convert it into a #tag_type.  Returns
+ * #TAG_NUM_OF_ITEM_TYPES if the string could not be recognized.
+ *
+ * Case does not matter.
+ */
+enum tag_type
+tag_name_parse_i(const char *name);
 
 /**
  * Creates an empty #tag.

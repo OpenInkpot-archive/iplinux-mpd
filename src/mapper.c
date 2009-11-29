@@ -21,6 +21,7 @@
  * Maps directory and song objects to file system paths.
  */
 
+#include "config.h"
 #include "mapper.h"
 #include "directory.h"
 #include "song.h"
@@ -159,9 +160,9 @@ map_song_fs(const struct song *song)
 	assert(song_is_file(song));
 
 	if (song_in_database(song))
-		return map_directory_child_fs(song->parent, song->url);
+		return map_directory_child_fs(song->parent, song->uri);
 	else
-		return utf8_to_fs_charset(song->url);
+		return utf8_to_fs_charset(song->uri);
 }
 
 char *
@@ -169,10 +170,10 @@ map_fs_to_utf8(const char *path_fs)
 {
 	if (music_dir != NULL &&
 	    strncmp(path_fs, music_dir, music_dir_length) == 0 &&
-	    path_fs[music_dir_length] == '/')
+	    G_IS_DIR_SEPARATOR(path_fs[music_dir_length]))
 		/* remove musicDir prefix */
 		path_fs += music_dir_length + 1;
-	else if (path_fs[0] == '/')
+	else if (G_IS_DIR_SEPARATOR(path_fs[0]))
 		/* not within musicDir */
 		return NULL;
 

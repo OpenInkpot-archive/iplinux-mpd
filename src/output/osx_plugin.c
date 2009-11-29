@@ -17,10 +17,12 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../output_api.h"
+#include "config.h"
+#include "output_api.h"
 
 #include <glib.h>
 #include <AudioUnit/AudioUnit.h>
+#include <CoreServices/CoreServices.h>
 
 #undef G_LOG_DOMAIN
 #define G_LOG_DOMAIN "osx"

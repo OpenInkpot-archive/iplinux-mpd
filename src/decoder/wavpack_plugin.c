@@ -17,9 +17,11 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../decoder_api.h"
-#include "../path.h"
-#include "../utils.h"
+#include "config.h"
+#include "decoder_api.h"
+#include "audio_check.h"
+#include "path.h"
+#include "utils.h"
 
 #include <wavpack/wavpack.h>
 #include <glib.h>
@@ -41,17 +43,17 @@ static struct {
 	const char *name;
 	enum tag_type type;
 } tagtypes[] = {
-	{ "artist", TAG_ITEM_ARTIST },
-	{ "album", TAG_ITEM_ALBUM },
-	{ "title", TAG_ITEM_TITLE },
-	{ "track", TAG_ITEM_TRACK },
-	{ "name", TAG_ITEM_NAME },
-	{ "genre", TAG_ITEM_GENRE },
-	{ "date", TAG_ITEM_DATE },
-	{ "composer", TAG_ITEM_COMPOSER },
-	{ "performer", TAG_ITEM_PERFORMER },
-	{ "comment", TAG_ITEM_COMMENT },
-	{ "disc", TAG_ITEM_DISC },
+	{ "artist", TAG_ARTIST },
+	{ "album", TAG_ALBUM },
+	{ "title", TAG_TITLE },
+	{ "track", TAG_TRACK },
+	{ "name", TAG_NAME },
+	{ "genre", TAG_GENRE },
+	{ "date", TAG_DATE },
+	{ "composer", TAG_COMPOSER },
+	{ "performer", TAG_PERFORMER },
+	{ "comment", TAG_COMMENT },
+	{ "disc", TAG_DISC },
 };
 
 /** A pointer type for format converter function. */
@@ -97,19 +99,11 @@ format_samples_int(int bytes_per_sample, void *buffer, uint32_t count)
 		}
 		break;
 	}
+
 	case 3:
+	case 4:
 		/* do nothing */
 		break;
-	case 4: {
-		uint32_t *dst = buffer;
-		assert_static(sizeof(*dst) <= sizeof(*src));
-
-		/* downsample to 24-bit */
-		while (count--) {
-			*dst++ = *src++ >> 8;
-		}
-		break;
-	}
 	}
 }
 
@@ -137,6 +131,8 @@ static void
 wavpack_decode(struct decoder *decoder, WavpackContext *wpc, bool can_seek,
 	       struct replay_gain_info *replay_gain_info)
 {
+	GError *error = NULL;
+	unsigned bits;
 	struct audio_format audio_format;
 	format_samples_t format_samples;
 	char chunk[CHUNK_SIZE];
@@ -145,22 +141,22 @@ wavpack_decode(struct decoder *decoder, WavpackContext *wpc, bool can_seek,
 	int bytes_per_sample, output_sample_size;
 	int position;
 
-	audio_format_init(&audio_format, WavpackGetSampleRate(wpc),
-			  WavpackGetBitsPerSample(wpc), 
-			  WavpackGetReducedChannels(wpc));
+	bits = WavpackGetBitsPerSample(wpc);
 
 	/* round bitwidth to 8-bit units */
-	audio_format.bits = (audio_format.bits + 7) & (~7);
-	/* mpd handles max 24-bit samples */
-	if (audio_format.bits > 24) {
-		audio_format.bits = 24;
-	}
+	bits = (bits + 7) & (~7);
+	/* MPD handles max 32-bit samples */
+	if (bits > 32)
+		bits = 32;
 
-	if (!audio_format_valid(&audio_format)) {
-		g_warning("Invalid audio format: %u:%u:%u\n",
-			  audio_format.sample_rate,
-			  audio_format.bits,
-			  audio_format.channels);
+	if ((WavpackGetMode(wpc) & MODE_FLOAT) == MODE_FLOAT)
+		bits = 24;
+
+	if (!audio_format_init_checked(&audio_format,
+				       WavpackGetSampleRate(wpc), bits,
+				       WavpackGetNumChannels(wpc), &error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
 		return;
 	}
 
@@ -509,7 +505,7 @@ wavpack_streamdecode(struct decoder * decoder, struct input_stream *is)
 	char error[ERRORLEN];
 	WavpackContext *wpc;
 	struct input_stream is_wvc;
-	int open_flags = OPEN_2CH_MAX | OPEN_NORMALIZE;
+	int open_flags = OPEN_NORMALIZE;
 	struct wavpack_input isp, isp_wvc;
 	bool can_seek = is->seekable;
 
@@ -554,7 +550,7 @@ wavpack_filedecode(struct decoder *decoder, const char *fname)
 
 	wpc = WavpackOpenFileInput(
 		fname, error,
-		OPEN_TAGS | OPEN_WVC | OPEN_2CH_MAX | OPEN_NORMALIZE, 23
+		OPEN_TAGS | OPEN_WVC | OPEN_NORMALIZE, 23
 	);
 	if (wpc == NULL) {
 		g_warning(

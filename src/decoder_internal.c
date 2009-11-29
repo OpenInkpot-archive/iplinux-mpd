@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "decoder_internal.h"
 #include "decoder_control.h"
 #include "player_control.h"
@@ -34,13 +35,13 @@
  * potentially blocking operation.
  */
 static int
-decoder_input_buffer(struct input_stream *is)
+decoder_input_buffer(struct decoder_control *dc, struct input_stream *is)
 {
 	int ret;
 
-	decoder_unlock();
+	decoder_unlock(dc);
 	ret = input_stream_buffer(is) > 0;
-	decoder_lock();
+	decoder_lock(dc);
 
 	return ret;
 }
@@ -50,20 +51,17 @@ decoder_input_buffer(struct input_stream *is)
  * one.
  */
 static enum decoder_command
-need_chunks(struct input_stream *is, bool do_wait)
+need_chunks(struct decoder_control *dc, struct input_stream *is, bool do_wait)
 {
-	if (dc.command == DECODE_COMMAND_STOP ||
-	    dc.command == DECODE_COMMAND_SEEK)
-		return dc.command;
+	if (dc->command == DECODE_COMMAND_STOP ||
+	    dc->command == DECODE_COMMAND_SEEK)
+		return dc->command;
 
-	if ((is == NULL || decoder_input_buffer(is) <= 0) && do_wait) {
-		decoder_wait();
+	if ((is == NULL || decoder_input_buffer(dc, is) <= 0) && do_wait) {
+		decoder_wait(dc);
+		player_signal();
 
-		decoder_unlock();
-		notify_signal(&pc.notify);
-		decoder_lock();
-
-		return dc.command;
+		return dc->command;
 	}
 
 	return DECODE_COMMAND_NONE;
@@ -72,6 +70,7 @@ need_chunks(struct input_stream *is, bool do_wait)
 struct music_chunk *
 decoder_get_chunk(struct decoder *decoder, struct input_stream *is)
 {
+	struct decoder_control *dc = decoder->dc;
 	enum decoder_command cmd;
 
 	assert(decoder != NULL);
@@ -80,13 +79,13 @@ decoder_get_chunk(struct decoder *decoder, struct input_stream *is)
 		return decoder->chunk;
 
 	do {
-		decoder->chunk = music_buffer_allocate(dc.buffer);
+		decoder->chunk = music_buffer_allocate(dc->buffer);
 		if (decoder->chunk != NULL)
 			return decoder->chunk;
 
-		decoder_lock();
-		cmd = need_chunks(is, true);
-		decoder_unlock();
+		decoder_lock(dc);
+		cmd = need_chunks(dc, is, true);
+		decoder_unlock(dc);
 	} while (cmd == DECODE_COMMAND_NONE);
 
 	return NULL;
@@ -95,13 +94,15 @@ decoder_get_chunk(struct decoder *decoder, struct input_stream *is)
 void
 decoder_flush_chunk(struct decoder *decoder)
 {
+	struct decoder_control *dc = decoder->dc;
+
 	assert(decoder != NULL);
 	assert(decoder->chunk != NULL);
 
 	if (music_chunk_is_empty(decoder->chunk))
-		music_buffer_return(dc.buffer, decoder->chunk);
+		music_buffer_return(dc->buffer, decoder->chunk);
 	else
-		music_pipe_push(dc.pipe, decoder->chunk);
+		music_pipe_push(dc->pipe, decoder->chunk);
 
 	decoder->chunk = NULL;
 }

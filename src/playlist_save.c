@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "playlist_save.h"
 #include "stored_playlist.h"
 #include "song.h"
@@ -54,7 +55,7 @@ playlist_print_uri(FILE *file, const char *uri)
 	char *s;
 
 	if (playlist_saveAbsolutePaths && !uri_has_scheme(uri) &&
-	    uri[0] != '/')
+	    !g_path_is_absolute(uri))
 		s = map_uri_fs(uri);
 	else
 		s = utf8_to_fs_charset(uri);

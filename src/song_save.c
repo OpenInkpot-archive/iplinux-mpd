@@ -17,12 +17,13 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "song_save.h"
 #include "song.h"
 #include "tag_save.h"
 #include "directory.h"
-#include "path.h"
 #include "tag.h"
+#include "text_file.h"
 
 #include <glib.h>
 
@@ -31,8 +32,8 @@
 #undef G_LOG_DOMAIN
 #define G_LOG_DOMAIN "song"
 
-#define SONG_KEY	"key: "
-#define SONG_MTIME	"mtime: "
+#define SONG_MTIME "mtime"
+#define SONG_END "song_end"
 
 static GQuark
 song_save_quark(void)
@@ -40,135 +41,81 @@ song_save_quark(void)
 	return g_quark_from_static_string("song_save");
 }
 
-static void
-song_save_url(FILE *fp, struct song *song)
-{
-	if (song->parent != NULL && song->parent->path != NULL)
-		fprintf(fp, SONG_FILE "%s/%s\n",
-			directory_get_path(song->parent), song->url);
-	else
-		fprintf(fp, SONG_FILE "%s\n",
-			song->url);
-}
-
 static int
 song_save(struct song *song, void *data)
 {
 	FILE *fp = data;
 
-	fprintf(fp, SONG_KEY "%s\n", song->url);
-
-	song_save_url(fp, song);
+	fprintf(fp, SONG_BEGIN "%s\n", song->uri);
 
 	if (song->tag != NULL)
 		tag_save(fp, song->tag);
 
-	fprintf(fp, SONG_MTIME "%li\n", (long)song->mtime);
+	fprintf(fp, SONG_MTIME ": %li\n", (long)song->mtime);
+	fprintf(fp, SONG_END "\n");
 
 	return 0;
 }
 
 void songvec_save(FILE *fp, struct songvec *sv)
 {
-	fprintf(fp, "%s\n", SONG_BEGIN);
 	songvec_for_each(sv, song_save, fp);
-	fprintf(fp, "%s\n", SONG_END);
 }
 
-static void
-commit_song(struct songvec *sv, struct song *newsong)
+struct song *
+song_load(FILE *fp, struct directory *parent, const char *uri,
+	  GString *buffer, GError **error_r)
 {
-	struct song *existing = songvec_find(sv, newsong->url);
-
-	if (!existing) {
-		songvec_add(sv, newsong);
-		if (newsong->tag)
-			tag_end_add(newsong->tag);
-	} else { /* prevent dupes, just update the existing song info */
-		if (existing->mtime != newsong->mtime) {
-			if (existing->tag != NULL)
-				tag_free(existing->tag);
-			if (newsong->tag)
-				tag_end_add(newsong->tag);
-			existing->tag = newsong->tag;
-			existing->mtime = newsong->mtime;
-			newsong->tag = NULL;
-		}
-		song_free(newsong);
-	}
-}
-
-static char *
-parse_tag_value(char *buffer, enum tag_type *type_r)
-{
-	int i;
-
-	for (i = 0; i < TAG_NUM_OF_ITEM_TYPES; i++) {
-		size_t len = strlen(tag_item_names[i]);
-
-		if (0 == strncmp(tag_item_names[i], buffer, len) &&
-		    buffer[len] == ':') {
-			*type_r = i;
-			return g_strchug(buffer + len + 1);
-		}
-	}
-
-	return NULL;
-}
-
-bool
-songvec_load(FILE *fp, struct songvec *sv, struct directory *parent,
-	     GError **error_r)
-{
-	char buffer[MPD_PATH_MAX + 1024];
-	struct song *song = NULL;
+	struct song *song = song_file_new(uri, parent);
+	char *line, *colon;
 	enum tag_type type;
 	const char *value;
 
-	while (fgets(buffer, sizeof(buffer), fp) &&
-	       !g_str_has_prefix(buffer, SONG_END)) {
-		g_strchomp(buffer);
+	while ((line = read_text_line(fp, buffer)) != NULL &&
+	       strcmp(line, SONG_END) != 0) {
+		colon = strchr(line, ':');
+		if (colon == NULL || colon == line) {
+			if (song->tag != NULL)
+				tag_end_add(song->tag);
+			song_free(song);
 
-		if (0 == strncmp(SONG_KEY, buffer, strlen(SONG_KEY))) {
-			if (song)
-				commit_song(sv, song);
-
-			song = song_file_new(buffer + strlen(SONG_KEY),
-					     parent);
-		} else if (*buffer == 0) {
-			/* ignore empty lines (starting with '\0') */
-		} else if (song == NULL) {
 			g_set_error(error_r, song_save_quark(), 0,
-				    "Problems reading song info");
+				    "unknown line in db: %s", line);
 			return false;
-		} else if (0 == strncmp(SONG_FILE, buffer, strlen(SONG_FILE))) {
-			/* we don't need this info anymore */
-		} else if ((value = parse_tag_value(buffer,
-						    &type)) != NULL) {
+		}
+
+		*colon++ = 0;
+		value = g_strchug(colon);
+
+		if ((type = tag_name_parse(line)) != TAG_NUM_OF_ITEM_TYPES) {
 			if (!song->tag) {
 				song->tag = tag_new();
 				tag_begin_add(song->tag);
 			}
 
 			tag_add_item(song->tag, type, value);
-		} else if (0 == strncmp(SONG_TIME, buffer, strlen(SONG_TIME))) {
+		} else if (strcmp(line, "Time") == 0) {
 			if (!song->tag) {
 				song->tag = tag_new();
 				tag_begin_add(song->tag);
 			}
 
-			song->tag->time = atoi(&(buffer[strlen(SONG_TIME)]));
-		} else if (0 == strncmp(SONG_MTIME, buffer, strlen(SONG_MTIME))) {
-			song->mtime = atoi(&(buffer[strlen(SONG_MTIME)]));
+			song->tag->time = atoi(value);
+		} else if (strcmp(line, SONG_MTIME) == 0) {
+			song->mtime = atoi(value);
 		} else {
+			if (song->tag != NULL)
+				tag_end_add(song->tag);
+			song_free(song);
+
 			g_set_error(error_r, song_save_quark(), 0,
-				    "unknown line in db: %s", buffer);
+				    "unknown line in db: %s", line);
 			return false;
 		}
 	}
 
-	if (song)
-		commit_song(sv, song);
+	if (song->tag != NULL)
+		tag_end_add(song->tag);
 
-	return true;
+	return song;
 }

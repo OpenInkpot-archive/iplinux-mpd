@@ -3,8 +3,15 @@ ver 0.16 (20??/??/??)
   - send song modification time to client
   - added "update" idle event
   - removed the deprecated "volume" command
+  - added the "findadd" command
+  - range support for "delete"
+  - "previous" really plays the previous song
+  - "addid" with negative position is deprecated
+  - "load" supports remote playlists (extm3u, pls, asx, xspf, lastfm://)
+  - allow changing replay gain mode on-the-fly
+  - omitting the range end is possible
 * input:
-  - lastfm: use metadata
+  - lastfm: obsolete plugin removed
 * tags:
   - added tags "ArtistSort", "AlbumArtistSort"
   - id3: revised "performer" tag support
@@ -13,18 +20,114 @@ ver 0.16 (20??/??/??)
   - ffmpeg: convert metadata to generic format
   - sndfile: new decoder plugin based on libsndfile
   - flac: load external cue sheet when no internal one
+  - mikmod: sample rate is configurable
+  - mpg123: new decoder plugin based on libmpg123
+  - sidplay: support sub-tunes
+  - sidplay: implemented songlength database
+  - sidplay: support seeking
+  - wavpack: activate 32 bit support
+  - wavpack: allow more than 2 channels
 * encoders:
   - twolame: new encoder plugin based on libtwolame
+  - flac: new encoder plugin based on libFLAC
+  - wave: new encoder plugin for PCM WAV format
+* output:
+  - recorder: new output plugin for recording radio streams
+  - alsa: don't recover on CANCEL
+  - alsa: fill period buffer with silence before draining
+  - openal: new output plugin
+  - pulse: announce "media.role=music"
+  - pulse: renamed context to "Music Player Daemon"
+  - pulse: connect to server on MPD startup, implement pause
+  - jack: require libjack 0.100
+  - jack: don't disconnect during pause
+  - jack: connect to server on MPD startup
+  - jack: added options "client_name", "server_name"
+  - jack: clear ring buffers before activating
+  - jack: renamed option "ports" to "destination_ports"
+  - jack: support more than two audio channels
+  - httpd: bind port when output is enabled
+  - wildcards allowed in audio_format configuration
+  - consistently lock audio output objects
+* player:
+  - drain audio outputs at the end of the playlist
 * mixers:
   - removed support for legacy mixer configuration
   - reimplemented software volume as mixer+filter plugin
   - per-device software/hardware mixer setting
 * commands:
   - added new "status" line with more precise "elapsed time"
+* update:
+  - automatically update the database with Linux inotify
+  - support .mpdignore files in the music directory
+  - sort songs by album name first, then disc/track number
+  - rescan after metadata_to_use change
 * log unused/unknown block parameters
+* removed the deprecated "error_file" option
 * save state when stopped
 * renamed option "--stdout" to "--stderr"
+* removed options --create-db and --no-create-db
+* state_file: save only if something has changed
+* database: eliminated maximum line length
+* log: redirect stdout/stderr to /dev/null if syslog is used
+* set the close-on-exec flag on all file descriptors
+* pcm_volume, pcm_mix: implemented 32 bit support
 * obey $(sysconfdir) for default mpd.conf location
+* build with large file support by default
+* require GLib 2.12
+
+
+ver 0.15.7 (2009/??/??)
+
+
+ver 0.15.6 (2009/11/18)
+* input:
+  - lastfm: fixed variable name in GLib<2.16 code path
+  - input/mms: require libmms 0.4
+* archive:
+  - zzip: require libzzip 0.13
+* tags:
+  - id3: allow 4 MB RIFF/AIFF tags
+* decoders:
+  - ffmpeg: convert metadata
+  - ffmpeg: align the output buffer
+  - oggflac: rewind stream after FLAC detection
+  - flac: fixed CUE seeking range check
+  - flac: fixed NULL pointer dereference in CUE code
+* output_thread: check again if output is open on PAUSE
+* update: delete ignored symlinks from database
+* database: increased maximum line length to 32 kB
+* sticker: added fallback for sqlite3_prepare_v2()
+
+
+ver 0.15.5 (2009/10/18)
+* input:
+  - curl: don't abort if a packet has only metadata
+  - curl: fixed endless loop during buffering
+* tags:
+  - riff, aiff: fixed "limited range" gcc warning
+* decoders:
+  - flac: fixed two memory leaks in the CUE tag loader
+* decoder_thread: change the fallback decoder name to "mad"
+* output_thread: check again if output is open on CANCEL
+* update: fixed memory leak during container scan
+
+
+ver 0.15.4 (2009/10/03)
+* decoders:
+  - vorbis: revert "faster tag scanning with ov_test_callback()"
+  - faad: skip assertion failure on large ID3 tags
+  - ffmpeg: use the "artist" tag if "author" is not present
+* output:
+  - osx: fix the OS X 10.6 build
+
+
+ver 0.15.3 (2009/08/29)
+* decoders:
+  - vorbis: faster tag scanning with ov_test_callback()
+* output:
+  - fix stuttering due to uninitialized variable
+* update: don't re-read unchanged container files
 
 
 ver 0.15.2 (2009/08/15)

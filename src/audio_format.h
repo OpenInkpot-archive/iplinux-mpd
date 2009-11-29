@@ -56,6 +56,13 @@ struct audio_format {
 };
 
 /**
+ * Buffer for audio_format_string().
+ */
+struct audio_format_string {
+	char buffer[24];
+};
+
+/**
  * Clears the #audio_format object, i.e. sets all attributes to an
  * undefined (invalid) value.
  */
@@ -88,6 +95,27 @@ static inline void audio_format_init(struct audio_format *af,
 static inline bool audio_format_defined(const struct audio_format *af)
 {
 	return af->sample_rate != 0;
+}
+
+/**
+ * Checks whether the specified #audio_format object is full, i.e. all
+ * attributes are defined.  This is more complete than
+ * audio_format_defined(), but slower.
+ */
+static inline bool
+audio_format_fully_defined(const struct audio_format *af)
+{
+	return af->sample_rate != 0 && af->bits != 0 && af->channels != 0;
+}
+
+/**
+ * Checks whether the specified #audio_format object has at least one
+ * defined value.
+ */
+static inline bool
+audio_format_mask_defined(const struct audio_format *af)
+{
+	return af->sample_rate != 0 || af->bits != 0 || af->channels != 0;
 }
 
 /**
@@ -132,6 +160,18 @@ static inline bool audio_format_valid(const struct audio_format *af)
 		audio_valid_channel_count(af->channels);
 }
 
+/**
+ * Returns false if the format mask is not valid for playback with
+ * MPD.  This function performs some basic validity checks.
+ */
+static inline bool audio_format_mask_valid(const struct audio_format *af)
+{
+	return (af->sample_rate == 0 ||
+		audio_valid_sample_rate(af->sample_rate)) &&
+		(af->bits == 0 || audio_valid_sample_format(af->bits)) &&
+		(af->channels == 0 || audio_valid_channel_count(af->channels));
+}
+
 static inline bool audio_format_equals(const struct audio_format *a,
 				       const struct audio_format *b)
 {
@@ -139,6 +179,20 @@ static inline bool audio_format_equals(const struct audio_format *a,
 		a->bits == b->bits &&
 		a->channels == b->channels &&
 		a->reverse_endian == b->reverse_endian;
+}
+
+static inline void
+audio_format_mask_apply(struct audio_format *af,
+			const struct audio_format *mask)
+{
+	if (mask->sample_rate != 0)
+		af->sample_rate = mask->sample_rate;
+
+	if (mask->bits != 0)
+		af->bits = mask->bits;
+
+	if (mask->channels != 0)
+		af->channels = mask->channels;
 }
 
 /**
@@ -171,5 +225,17 @@ static inline double audio_format_time_to_size(const struct audio_format *af)
 {
 	return af->sample_rate * audio_format_frame_size(af);
 }
+
+/**
+ * Renders the #audio_format object into a string, e.g. for printing
+ * it in a log file.
+ *
+ * @param af the #audio_format object
+ * @param s a buffer to print into
+ * @return the string, or NULL if the #audio_format object is invalid
+ */
+const char *
+audio_format_to_string(const struct audio_format *af,
+		       struct audio_format_string *s);
 
 #endif

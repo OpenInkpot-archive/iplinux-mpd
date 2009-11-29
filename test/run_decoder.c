@@ -17,16 +17,26 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "decoder_list.h"
 #include "decoder_api.h"
 #include "input_stream.h"
 #include "audio_format.h"
 #include "pcm_volume.h"
+#include "idle.h"
 
 #include <glib.h>
 
 #include <assert.h>
 #include <unistd.h>
+
+/**
+ * No-op dummy.
+ */
+void
+idle_add(G_GNUC_UNUSED unsigned flags)
+{
+}
 
 /**
  * No-op dummy.
@@ -53,11 +63,13 @@ decoder_initialized(struct decoder *decoder,
 		    G_GNUC_UNUSED bool seekable,
 		    G_GNUC_UNUSED float total_time)
 {
+	struct audio_format_string af_string;
+
 	assert(!decoder->initialized);
 	assert(audio_format_valid(audio_format));
 
-	g_printerr("audio_format=%u:%u:%u\n", audio_format->sample_rate,
-		   audio_format->bits, audio_format->channels);
+	g_printerr("audio_format=%s\n",
+		   audio_format_to_string(audio_format, &af_string));
 
 	decoder->initialized = true;
 }

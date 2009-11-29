@@ -17,10 +17,10 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "archive_list.h"
 #include "archive_api.h"
 #include "utils.h"
-#include "config.h"
 
 #include <string.h>
 #include <glib.h>
@@ -60,7 +60,8 @@ archive_plugin_from_suffix(const char *suffix)
 	for (i=0; i < num_archive_plugins; ++i) {
 		const struct archive_plugin *plugin = archive_plugins[i];
 		if (archive_plugins_enabled[i] &&
-		    stringFoundInStringArray(plugin->suffixes, suffix)) {
+		    plugin->suffixes != NULL &&
+		    string_array_contains(plugin->suffixes, suffix)) {
 			++i;
 			return plugin;
 		}

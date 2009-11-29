@@ -21,12 +21,15 @@
 #define MPD_OUTPUT_INTERNAL_H
 
 #include "audio_format.h"
-#include "notify.h"
+
+#include <glib.h>
 
 #include <time.h>
 
 enum audio_output_command {
 	AO_COMMAND_NONE = 0,
+	AO_COMMAND_ENABLE,
+	AO_COMMAND_DISABLE,
 	AO_COMMAND_OPEN,
 
 	/**
@@ -37,6 +40,13 @@ enum audio_output_command {
 
 	AO_COMMAND_CLOSE,
 	AO_COMMAND_PAUSE,
+
+	/**
+	 * Drains the internal (hardware) buffers of the device.  This
+	 * operation may take a while to complete.
+	 */
+	AO_COMMAND_DRAIN,
+
 	AO_COMMAND_CANCEL,
 	AO_COMMAND_KILL
 };
@@ -66,15 +76,15 @@ struct audio_output {
 	struct mixer *mixer;
 
 	/**
-	 * This flag is true, when the audio_format of this device is
-	 * configured in mpd.conf.
-	 */
-	bool config_audio_format;
-
-	/**
 	 * Has the user enabled this device?
 	 */
 	bool enabled;
+
+	/**
+	 * Is this device actually enabled, i.e. the "enable" method
+	 * has succeeded?
+	 */
+	bool really_enabled;
 
 	/**
 	 * Is the device (already) open and functional?
@@ -98,6 +108,11 @@ struct audio_output {
 	 * explicitly reopened with "play").
 	 */
 	GTimer *fail_timer;
+
+	/**
+	 * The configured audio format.
+	 */
+	struct audio_format config_audio_format;
 
 	/**
 	 * The audio_format in which audio data is received from the
@@ -134,11 +149,6 @@ struct audio_output {
 	GThread *thread;
 
 	/**
-	 * Notify object for the thread.
-	 */
-	struct notify notify;
-
-	/**
 	 * The next command to be performed by the output thread.
 	 */
 	enum audio_output_command command;
@@ -152,6 +162,12 @@ struct audio_output {
 	 * This mutex protects #open, #chunk and #chunk_finished.
 	 */
 	GMutex *mutex;
+
+	/**
+	 * This condition object wakes up the output thread after
+	 * #command has been set.
+	 */
+	GCond *cond;
 
 	/**
 	 * The #music_chunk which is currently being played.  All

@@ -66,6 +66,13 @@ struct audio_output *
 audio_output_find(const char *name);
 
 /**
+ * Checks the "enabled" flag of all audio outputs, and if one has
+ * changed, commit the change.
+ */
+void
+audio_output_all_enable_disable(void);
+
+/**
  * Opens all audio outputs which are not disabled.
  *
  * @param audio_format the preferred audio format, or NULL to reuse
@@ -123,9 +130,23 @@ void
 audio_output_all_pause(void);
 
 /**
+ * Drain all audio outputs.
+ */
+void
+audio_output_all_drain(void);
+
+/**
  * Try to cancel data which may still be in the device's buffers.
  */
 void
 audio_output_all_cancel(void);
+
+/**
+ * Returns the "elapsed_time" stamp of the most recently finished
+ * chunk.  A negative value is returned when no chunk has been
+ * finished yet.
+ */
+float
+audio_output_all_get_elapsed_time(void);
 
 #endif

@@ -30,7 +30,6 @@
 #define CONF_DB_FILE                    "db_file"
 #define CONF_STICKER_FILE "sticker_file"
 #define CONF_LOG_FILE                   "log_file"
-#define CONF_ERROR_FILE                 "error_file"
 #define CONF_PID_FILE                   "pid_file"
 #define CONF_STATE_FILE                 "state_file"
 #define CONF_USER                       "user"
@@ -68,6 +67,8 @@
 #define CONF_DECODER "decoder"
 #define CONF_INPUT "input"
 #define CONF_GAPLESS_MP3_PLAYBACK	"gapless_mp3_playback"
+#define CONF_PLAYLIST_PLUGIN "playlist_plugin"
+#define CONF_AUTO_UPDATE		"auto_update"
 
 #define DEFAULT_PLAYLIST_MAX_LENGTH (1024*16)
 #define DEFAULT_PLAYLIST_SAVE_ABSOLUTE_PATHS false
@@ -117,7 +118,8 @@ void config_global_finish(void);
  */
 void config_global_check(void);
 
-void config_read_file(const char *file);
+bool
+config_read_file(const char *file, GError **error_r);
 
 /* don't free the returned value
    set _last_ to NULL to get first entry */
@@ -193,8 +195,8 @@ config_get_block_bool(const struct config_param *param, const char *name,
 struct config_param *
 config_new_param(const char *value, int line);
 
-void
-config_add_block_param(struct config_param *param, const char *name,
-		       const char *value, int line);
+bool
+config_add_block_param(struct config_param * param, const char *name,
+		       const char *value, int line, GError **error_r);
 
 #endif

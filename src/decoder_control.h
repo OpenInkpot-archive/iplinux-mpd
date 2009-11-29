@@ -27,11 +27,6 @@
 
 #include <assert.h>
 
-#define DECODE_TYPE_FILE	0
-#define DECODE_TYPE_URL		1
-
-struct notify;
-
 enum decoder_state {
 	DECODE_STATE_STOP = 0,
 	DECODE_STATE_START,
@@ -77,39 +72,47 @@ struct decoder_control {
 	/** the format being sent to the music pipe */
 	struct audio_format out_audio_format;
 
-	struct song *current_song;
-	struct song *next_song;
+	/**
+	 * The song currently being decoded.  This attribute is set by
+	 * the player thread, when it sends the #DECODE_COMMAND_START
+	 * command.
+	 */
+	const struct song *song;
+
 	float total_time;
 
 	/** the #music_chunk allocator */
 	struct music_buffer *buffer;
 
-	/** the destination pipe for decoded chunks */
+	/**
+	 * The destination pipe for decoded chunks.  The caller thread
+	 * owns this object, and is responsible for freeing it.
+	 */
 	struct music_pipe *pipe;
 };
 
-extern struct decoder_control dc;
+void
+dc_init(struct decoder_control *dc);
 
-void dc_init(void);
-
-void dc_deinit(void);
+void
+dc_deinit(struct decoder_control *dc);
 
 /**
  * Locks the #decoder_control object.
  */
 static inline void
-decoder_lock(void)
+decoder_lock(struct decoder_control *dc)
 {
-	g_mutex_lock(dc.mutex);
+	g_mutex_lock(dc->mutex);
 }
 
 /**
  * Unlocks the #decoder_control object.
  */
 static inline void
-decoder_unlock(void)
+decoder_unlock(struct decoder_control *dc)
 {
-	g_mutex_unlock(dc.mutex);
+	g_mutex_unlock(dc->mutex);
 }
 
 /**
@@ -118,9 +121,9 @@ decoder_unlock(void)
  * prior to calling this function.
  */
 static inline void
-decoder_wait(void)
+decoder_wait(struct decoder_control *dc)
 {
-	g_cond_wait(dc.cond, dc.mutex);
+	g_cond_wait(dc->cond, dc->mutex);
 }
 
 /**
@@ -129,75 +132,79 @@ decoder_wait(void)
  * this function.
  */
 static inline void
-decoder_signal(void)
+decoder_signal(struct decoder_control *dc)
 {
-	g_cond_signal(dc.cond);
+	g_cond_signal(dc->cond);
 }
 
-static inline bool decoder_is_idle(void)
+static inline bool
+decoder_is_idle(const struct decoder_control *dc)
 {
-	return (dc.state == DECODE_STATE_STOP ||
-		dc.state == DECODE_STATE_ERROR) &&
-		dc.command != DECODE_COMMAND_START;
+	return dc->state == DECODE_STATE_STOP ||
+		dc->state == DECODE_STATE_ERROR;
 }
 
-static inline bool decoder_is_starting(void)
+static inline bool
+decoder_is_starting(const struct decoder_control *dc)
 {
-	return dc.command == DECODE_COMMAND_START ||
-		dc.state == DECODE_STATE_START;
+	return dc->state == DECODE_STATE_START;
 }
 
-static inline bool decoder_has_failed(void)
+static inline bool
+decoder_has_failed(const struct decoder_control *dc)
 {
-	assert(dc.command == DECODE_COMMAND_NONE);
+	assert(dc->command == DECODE_COMMAND_NONE);
 
-	return dc.state == DECODE_STATE_ERROR;
+	return dc->state == DECODE_STATE_ERROR;
 }
 
-static inline bool decoder_lock_is_idle(void)
+static inline bool
+decoder_lock_is_idle(struct decoder_control *dc)
 {
 	bool ret;
 
-	decoder_lock();
-	ret = decoder_is_idle();
-	decoder_unlock();
+	decoder_lock(dc);
+	ret = decoder_is_idle(dc);
+	decoder_unlock(dc);
 
 	return ret;
 }
 
-static inline bool decoder_lock_is_starting(void)
+static inline bool
+decoder_lock_is_starting(struct decoder_control *dc)
 {
 	bool ret;
 
-	decoder_lock();
-	ret = decoder_is_starting();
-	decoder_unlock();
+	decoder_lock(dc);
+	ret = decoder_is_starting(dc);
+	decoder_unlock(dc);
 
 	return ret;
 }
 
-static inline bool decoder_lock_has_failed(void)
+static inline bool
+decoder_lock_has_failed(struct decoder_control *dc)
 {
 	bool ret;
 
-	decoder_lock();
-	ret = decoder_has_failed();
-	decoder_unlock();
+	decoder_lock(dc);
+	ret = decoder_has_failed(dc);
+	decoder_unlock(dc);
 
 	return ret;
 }
 
-static inline struct song *
-decoder_current_song(void)
+static inline const struct song *
+decoder_current_song(const struct decoder_control *dc)
 {
-	switch (dc.state) {
+	switch (dc->state) {
 	case DECODE_STATE_STOP:
 	case DECODE_STATE_ERROR:
 		return NULL;
 
 	case DECODE_STATE_START:
 	case DECODE_STATE_DECODE:
-		return dc.current_song;
+		return dc->song;
 	}
 
 	assert(false);
@@ -205,21 +212,27 @@ decoder_current_song(void)
 }
 
 void
-dc_command_wait(struct notify *notify);
+dc_command_wait(struct decoder_control *dc);
+
+/**
+ * Start the decoder.
+ *
+ * @param the decoder
+ * @param song the song to be decoded
+ * @param pipe the pipe which receives the decoded chunks (owned by
+ * the caller)
+ */
+void
+dc_start(struct decoder_control *dc, struct song *song,
+	 struct music_buffer *buffer, struct music_pipe *pipe);
 
 void
-dc_start(struct notify *notify, struct song *song);
-
-void
-dc_start_async(struct song *song);
-
-void
-dc_stop(struct notify *notify);
+dc_stop(struct decoder_control *dc);
 
 bool
-dc_seek(struct notify *notify, double where);
+dc_seek(struct decoder_control *dc, double where);
 
 void
-dc_quit(void);
+dc_quit(struct decoder_control *dc);
 
 #endif

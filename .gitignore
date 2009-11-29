@@ -35,6 +35,7 @@ mpd
 stamp-h1
 tags
 *~
+.#*
 .stgit*
 doc/protocol.html
 doc/protocol
@@ -43,6 +44,7 @@ doc/developer
 doc/sticker
 doc/api
 test/software_volume
+test/run_convert
 test/run_decoder
 test/read_tags
 test/run_filter
@@ -51,3 +53,4 @@ test/run_output
 test/read_conf
 test/run_input
 test/read_mixer
+test/dump_playlist

@@ -17,10 +17,11 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "log.h"
 #include "conf.h"
 #include "utils.h"
-#include "config.h"
+#include "fd_util.h"
 
 #include <assert.h>
 #include <sys/types.h>
@@ -128,7 +129,7 @@ open_log_file(void)
 {
 	assert(out_filename != NULL);
 
-	return open(out_filename, O_CREAT | O_WRONLY | O_APPEND, 0666);
+	return open_cloexec(out_filename, O_CREAT | O_WRONLY | O_APPEND, 0666);
 }
 
 static void
@@ -271,7 +272,10 @@ void setup_log_output(bool use_stdout)
 {
 	fflush(NULL);
 	if (!use_stdout) {
-		if (out_filename != NULL) {
+		if (out_filename == NULL)
+			out_fd = open("/dev/null", O_WRONLY);
+
+		if (out_fd >= 0) {
 			redirect_logs(out_fd);
 			close(out_fd);
 		}

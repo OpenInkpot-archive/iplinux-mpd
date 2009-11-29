@@ -17,8 +17,10 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../output_api.h"
-#include "../mixer_api.h"
+#include "config.h"
+#include "mixer_api.h"
+#include "output_api.h"
+#include "fd_util.h"
 
 #include <glib.h>
 
@@ -49,6 +51,15 @@ struct oss_mixer {
 	int volume_control;
 };
 
+/**
+ * The quark used for GError.domain.
+ */
+static inline GQuark
+oss_mixer_quark(void)
+{
+	return g_quark_from_static_string("oss_mixer");
+}
+
 static int
 oss_find_mixer(const char *name)
 {
@@ -65,11 +76,12 @@ oss_find_mixer(const char *name)
 }
 
 static struct mixer *
-oss_mixer_init(const struct config_param *param)
+oss_mixer_init(G_GNUC_UNUSED void *ao, const struct config_param *param,
+	       GError **error_r)
 {
 	struct oss_mixer *om = g_new(struct oss_mixer, 1);
 
-	mixer_init(&om->base, &oss_mixer);
+	mixer_init(&om->base, &oss_mixer_plugin);
 
 	om->device = config_get_block_string(param, "mixer_device",
 					     VOLUME_MIXER_OSS_DEFAULT);
@@ -78,9 +90,9 @@ oss_mixer_init(const struct config_param *param)
 	if (om->control != NULL) {
 		om->volume_control = oss_find_mixer(om->control);
 		if (om->volume_control < 0) {
-			g_warning("mixer control \"%s\" not found",
-				  om->control);
 			g_free(om);
+			g_set_error(error_r, oss_mixer_quark(), 0,
+				    "no such mixer control: %s", om->control);
 			return NULL;
 		}
 	} else
@@ -108,13 +120,15 @@ oss_mixer_close(struct mixer *data)
 }
 
 static bool
-oss_mixer_open(struct mixer *data)
+oss_mixer_open(struct mixer *data, GError **error_r)
 {
 	struct oss_mixer *om = (struct oss_mixer *) data;
 
-	om->device_fd = open(om->device, O_RDONLY);
+	om->device_fd = open_cloexec(om->device, O_RDONLY, 0);
 	if (om->device_fd < 0) {
-		g_warning("Unable to open oss mixer \"%s\"\n", om->device);
+		g_set_error(error_r, oss_mixer_quark(), errno,
+			    "failed to open %s: %s",
+			    om->device, g_strerror(errno));
 		return false;
 	}
 
@@ -122,14 +136,17 @@ oss_mixer_open(struct mixer *data)
 		int devmask = 0;
 
 		if (ioctl(om->device_fd, SOUND_MIXER_READ_DEVMASK, &devmask) < 0) {
-			g_warning("errors getting read_devmask for oss mixer\n");
+			g_set_error(error_r, oss_mixer_quark(), errno,
+				    "READ_DEVMASK failed: %s",
+				    g_strerror(errno));
 			oss_mixer_close(data);
 			return false;
 		}
 
 		if (((1 << om->volume_control) & devmask) == 0) {
-			g_warning("mixer control \"%s\" not usable\n",
-				om->control);
+			g_set_error(error_r, oss_mixer_quark(), 0,
+				    "mixer control \"%s\" not usable",
+				    om->control);
 			oss_mixer_close(data);
 			return false;
 		}
@@ -138,7 +155,7 @@ oss_mixer_open(struct mixer *data)
 }
 
 static int
-oss_mixer_get_volume(struct mixer *mixer)
+oss_mixer_get_volume(struct mixer *mixer, GError **error_r)
 {
 	struct oss_mixer *om = (struct oss_mixer *)mixer;
 	int left, right, level;
@@ -148,7 +165,9 @@ oss_mixer_get_volume(struct mixer *mixer)
 
 	ret = ioctl(om->device_fd, MIXER_READ(om->volume_control), &level);
 	if (ret < 0) {
-		g_warning("unable to read oss volume\n");
+		g_set_error(error_r, oss_mixer_quark(), errno,
+			    "failed to read OSS volume: %s",
+			    g_strerror(errno));
 		return false;
 	}
 
@@ -164,7 +183,7 @@ oss_mixer_get_volume(struct mixer *mixer)
 }
 
 static bool
-oss_mixer_set_volume(struct mixer *mixer, unsigned volume)
+oss_mixer_set_volume(struct mixer *mixer, unsigned volume, GError **error_r)
 {
 	struct oss_mixer *om = (struct oss_mixer *)mixer;
 	int level;
@@ -177,14 +196,16 @@ oss_mixer_set_volume(struct mixer *mixer, unsigned volume)
 
 	ret = ioctl(om->device_fd, MIXER_WRITE(om->volume_control), &level);
 	if (ret < 0) {
-		g_warning("unable to set oss volume\n");
+		g_set_error(error_r, oss_mixer_quark(), errno,
+			    "failed to set OSS volume: %s",
+			    g_strerror(errno));
 		return false;
 	}
 
 	return true;
 }
 
-const struct mixer_plugin oss_mixer = {
+const struct mixer_plugin oss_mixer_plugin = {
 	.init = oss_mixer_init,
 	.finish = oss_mixer_finish,
 	.open = oss_mixer_open,

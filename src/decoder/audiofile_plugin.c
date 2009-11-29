@@ -17,7 +17,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../decoder_api.h"
+#include "config.h"
+#include "decoder_api.h"
+#include "audio_check.h"
 
 #include <audiofile.h>
 #include <af_vfs.h>
@@ -99,13 +101,32 @@ setup_virtual_fops(struct input_stream *stream)
 	return vf;
 }
 
+static uint8_t
+audiofile_setup_sample_format(AFfilehandle af_fp)
+{
+	int fs, bits;
+
+	afGetSampleFormat(af_fp, AF_DEFAULT_TRACK, &fs, &bits);
+	if (!audio_valid_sample_format(bits)) {
+		g_debug("input file has %d bit samples, converting to 16",
+			bits);
+		bits = 16;
+	}
+
+	afSetVirtualSampleFormat(af_fp, AF_DEFAULT_TRACK,
+	                         AF_SAMPFMT_TWOSCOMP, bits);
+	afGetVirtualSampleFormat(af_fp, AF_DEFAULT_TRACK, &fs, &bits);
+
+	return bits;
+}
+
 static void
 audiofile_stream_decode(struct decoder *decoder, struct input_stream *is)
 {
+	GError *error = NULL;
 	AFvirtualfile *vf;
 	int fs, frame_count;
 	AFfilehandle af_fp;
-	int bits;
 	struct audio_format audio_format;
 	float total_time;
 	uint16_t bit_rate;
@@ -126,24 +147,13 @@ audiofile_stream_decode(struct decoder *decoder, struct input_stream *is)
 		return;
 	}
 
-	afGetSampleFormat(af_fp, AF_DEFAULT_TRACK, &fs, &bits);
-	if (!audio_valid_sample_format(bits)) {
-		g_debug("input file has %d bit samples, converting to 16",
-			bits);
-		bits = 16;
-	}
-
-	afSetVirtualSampleFormat(af_fp, AF_DEFAULT_TRACK,
-	                         AF_SAMPFMT_TWOSCOMP, bits);
-	afGetVirtualSampleFormat(af_fp, AF_DEFAULT_TRACK, &fs, &bits);
-
-	audio_format_init(&audio_format, afGetRate(af_fp, AF_DEFAULT_TRACK),
-			  bits, afGetVirtualChannels(af_fp, AF_DEFAULT_TRACK)); 
-
-	if (!audio_format_valid(&audio_format)) {
-		g_warning("Invalid audio format: %u:%u:%u\n",
-			  audio_format.sample_rate, audio_format.bits,
-			  audio_format.channels);
+	if (!audio_format_init_checked(&audio_format,
+				       afGetRate(af_fp, AF_DEFAULT_TRACK),
+				       audiofile_setup_sample_format(af_fp),
+				       afGetVirtualChannels(af_fp, AF_DEFAULT_TRACK),
+				       &error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
 		afCloseFile(af_fp);
 		return;
 	}

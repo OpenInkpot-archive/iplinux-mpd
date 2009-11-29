@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "conf.h"
 #include "audio_parser.h"
 #include "audio_format.h"
@@ -71,6 +72,7 @@ load_filter(const char *name)
 int main(int argc, char **argv)
 {
 	struct audio_format audio_format;
+	struct audio_format_string af_string;
 	bool success;
 	GError *error = NULL;
 	struct filter *filter;
@@ -90,12 +92,18 @@ int main(int argc, char **argv)
 	/* read configuration file (mpd.conf) */
 
 	config_global_init();
-	config_read_file(argv[1]);
+	success = config_read_file(argv[1], &error);
+	if (!success) {
+		g_printerr("%s:", error->message);
+		g_error_free(error);
+		return 1;
+	}
 
 	/* parse the audio format */
 
 	if (argc > 3) {
-		success = audio_format_parse(&audio_format, argv[3], &error);
+		success = audio_format_parse(&audio_format, argv[3],
+					     false, &error);
 		if (!success) {
 			g_printerr("Failed to parse audio format: %s\n",
 				   error->message);
@@ -120,9 +128,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-
-	g_printerr("audio_format=%u:%u:%u\n", out_audio_format->sample_rate,
-		   out_audio_format->bits, out_audio_format->channels);
+	g_printerr("audio_format=%s\n",
+		   audio_format_to_string(out_audio_format, &af_string));
 
 	frame_size = audio_format_frame_size(&audio_format);
 

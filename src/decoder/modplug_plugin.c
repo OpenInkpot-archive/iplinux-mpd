@@ -17,10 +17,12 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "../decoder_api.h"
+#include "config.h"
+#include "decoder_api.h"
 
 #include <glib.h>
 #include <modplug.h>
+#include <assert.h>
 
 #undef G_LOG_DOMAIN
 #define G_LOG_DOMAIN "modplug"
@@ -92,10 +94,9 @@ mod_decode(struct decoder *decoder, struct input_stream *is)
 	ModPlug_Settings settings;
 	GByteArray *bdatas;
 	struct audio_format audio_format;
-	float total_time = 0.0;
-	int ret, current;
+	int ret;
 	char audio_buffer[MODPLUG_FRAME_SIZE];
-	float sec_perbyte;
+	unsigned frame_size, current_frame = 0;
 	enum decoder_command cmd = DECODE_COMMAND_NONE;
 
 	bdatas = mod_loadfile(decoder, is);
@@ -122,34 +123,30 @@ mod_decode(struct decoder *decoder, struct input_stream *is)
 	}
 
 	audio_format_init(&audio_format, 44100, 16, 2);
-
-	sec_perbyte =
-	    1.0 / ((audio_format.bits * audio_format.channels / 8.0) *
-		   (float)audio_format.sample_rate);
-
-	total_time = ModPlug_GetLength(f) / 1000;
+	assert(audio_format_valid(&audio_format));
 
 	decoder_initialized(decoder, &audio_format,
-			    is->seekable, total_time);
+			    is->seekable, ModPlug_GetLength(f) / 1000.0);
 
-	total_time = 0;
+	frame_size = audio_format_frame_size(&audio_format);
 
 	do {
 		ret = ModPlug_Read(f, audio_buffer, MODPLUG_FRAME_SIZE);
-
-		if (ret == 0) {
+		if (ret <= 0)
 			break;
-		}
 
-		total_time += ret * sec_perbyte;
+		current_frame += (unsigned)ret / frame_size;
 		cmd = decoder_data(decoder, NULL,
 				   audio_buffer, ret,
-				   total_time, 0, NULL);
+				   (float)current_frame / (float)audio_format.sample_rate,
+				   0, NULL);
 
 		if (cmd == DECODE_COMMAND_SEEK) {
-			total_time = decoder_seek_where(decoder);
-			current = total_time * 1000;
-			ModPlug_Seek(f, current);
+			float where = decoder_seek_where(decoder);
+
+			ModPlug_Seek(f, (int)(where * 1000.0));
+			current_frame = (unsigned)(where * audio_format.sample_rate);
+
 			decoder_command_finished(decoder);
 		}
 
@@ -188,7 +185,7 @@ static struct tag *mod_tagdup(const char *file)
 
 	title = g_strdup(ModPlug_GetName(f));
 	if (title)
-		tag_add_item(ret, TAG_ITEM_TITLE, title);
+		tag_add_item(ret, TAG_TITLE, title);
 	g_free(title);
 
 	ModPlug_Unload(f);

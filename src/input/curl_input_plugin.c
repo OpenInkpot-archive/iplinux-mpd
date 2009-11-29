@@ -17,12 +17,13 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "input/curl_input_plugin.h"
 #include "input_plugin.h"
 #include "conf.h"
-#include "config.h"
 #include "tag.h"
 #include "icy_metadata.h"
+#include "glib_compat.h"
 
 #include <assert.h>
 
@@ -42,7 +43,7 @@
 #define G_LOG_DOMAIN "input_curl"
 
 /** rewinding is possible after up to 64 kB */
-static const off_t max_rewind_size = 64 * 1024;
+static const goffset max_rewind_size = 64 * 1024;
 
 /**
  * Buffers created by input_curl_writefunction().
@@ -149,11 +150,6 @@ buffer_free_callback(gpointer data, G_GNUC_UNUSED gpointer user_data)
 
 	g_free(data);
 }
-
-/* g_queue_clear() was introduced in GLib 2.14 */
-#if !GLIB_CHECK_VERSION(2,14,0)
-#define g_queue_clear(q) do { g_queue_free(q); q = g_queue_new(); } while (0)
-#endif
 
 /**
  * Frees the current "libcurl easy" handle, and everything associated
@@ -282,6 +278,42 @@ input_curl_select(struct input_curl *c)
 	return ret;
 }
 
+static bool
+fill_buffer(struct input_stream *is)
+{
+	struct input_curl *c = is->data;
+	CURLMcode mcode = CURLM_CALL_MULTI_PERFORM;
+
+	while (!c->eof && g_queue_is_empty(c->buffers)) {
+		int running_handles;
+		bool bret;
+
+		if (mcode != CURLM_CALL_MULTI_PERFORM) {
+			/* if we're still here, there is no input yet
+			   - wait for input */
+			int ret = input_curl_select(c);
+			if (ret <= 0)
+				/* no data yet or error */
+				return false;
+		}
+
+		mcode = curl_multi_perform(c->multi, &running_handles);
+		if (mcode != CURLM_OK && mcode != CURLM_CALL_MULTI_PERFORM) {
+			g_warning("curl_multi_perform() failed: %s\n",
+				  curl_multi_strerror(mcode));
+			c->eof = true;
+			is->ready = true;
+			return false;
+		}
+
+		bret = input_curl_multi_info_read(is);
+		if (!bret)
+			return false;
+	}
+
+	return !g_queue_is_empty(c->buffers);
+}
+
 /**
  * Mark a part of the buffer object as consumed.
  */
@@ -371,8 +403,8 @@ copy_icy_tag(struct input_curl *c)
 	if (c->tag != NULL)
 		tag_free(c->tag);
 
-	if (c->meta_name != NULL && !tag_has_type(tag, TAG_ITEM_NAME))
-		tag_add_item(tag, TAG_ITEM_NAME, c->meta_name);
+	if (c->meta_name != NULL && !tag_has_type(tag, TAG_NAME))
+		tag_add_item(tag, TAG_NAME, c->meta_name);
 
 	c->tag = tag;
 }
@@ -381,7 +413,7 @@ static size_t
 input_curl_read(struct input_stream *is, void *ptr, size_t size)
 {
 	struct input_curl *c = is->data;
-	CURLMcode mcode = CURLM_CALL_MULTI_PERFORM;
+	bool success;
 	GQueue *rewind_buffers;
 	size_t nbytes = 0;
 	char *dest = ptr;
@@ -389,7 +421,7 @@ input_curl_read(struct input_stream *is, void *ptr, size_t size)
 #ifndef NDEBUG
 	if (c->rewind != NULL &&
 	    (!g_queue_is_empty(c->rewind) || is->offset == 0)) {
-		off_t offset = 0;
+		goffset offset = 0;
 		struct buffer *buffer;
 
 		for (GList *list = g_queue_peek_head_link(c->rewind);
@@ -407,63 +439,42 @@ input_curl_read(struct input_stream *is, void *ptr, size_t size)
 	}
 #endif
 
-	/* fill the buffer */
+	do {
+		/* fill the buffer */
 
-	while (!c->eof && g_queue_is_empty(c->buffers)) {
-		int running_handles;
-		bool bret;
-
-		if (mcode != CURLM_CALL_MULTI_PERFORM) {
-			/* if we're still here, there is no input yet
-			   - wait for input */
-			int ret = input_curl_select(c);
-			if (ret <= 0)
-				/* no data yet or error */
-				return 0;
-		}
-
-		mcode = curl_multi_perform(c->multi, &running_handles);
-		if (mcode != CURLM_OK && mcode != CURLM_CALL_MULTI_PERFORM) {
-			g_warning("curl_multi_perform() failed: %s\n",
-				  curl_multi_strerror(mcode));
-			c->eof = true;
-			is->ready = true;
+		success = fill_buffer(is);
+		if (!success)
 			return 0;
+
+		/* send buffer contents */
+
+		if (c->rewind != NULL &&
+		    (!g_queue_is_empty(c->rewind) || is->offset == 0))
+			/* at the beginning or already writing the rewind
+			   buffer list */
+			rewind_buffers = c->rewind;
+		else
+			/* we don't need the rewind buffers anymore */
+			rewind_buffers = NULL;
+
+		while (size > 0 && !g_queue_is_empty(c->buffers)) {
+			size_t copy = read_from_buffer(&c->icy_metadata, c->buffers,
+						       dest + nbytes, size,
+						       rewind_buffers);
+
+			nbytes += copy;
+			size -= copy;
 		}
-
-		bret = input_curl_multi_info_read(is);
-		if (!bret)
-			return 0;
-	}
-
-	/* send buffer contents */
-
-	if (c->rewind != NULL &&
-	    (!g_queue_is_empty(c->rewind) || is->offset == 0))
-		/* at the beginning or already writing the rewind
-		   buffer list */
-		rewind_buffers = c->rewind;
-	else
-		/* we don't need the rewind buffers anymore */
-		rewind_buffers = NULL;
-
-	while (size > 0 && !g_queue_is_empty(c->buffers)) {
-		size_t copy = read_from_buffer(&c->icy_metadata, c->buffers,
-					       dest + nbytes, size,
-					       rewind_buffers);
-
-		nbytes += copy;
-		size -= copy;
-	}
+	} while (nbytes == 0);
 
 	if (icy_defined(&c->icy_metadata))
 		copy_icy_tag(c);
 
-	is->offset += (off_t)nbytes;
+	is->offset += (goffset)nbytes;
 
 #ifndef NDEBUG
 	if (rewind_buffers != NULL) {
-		off_t offset = 0;
+		goffset offset = 0;
 		struct buffer *buffer;
 
 		for (GList *list = g_queue_peek_head_link(c->rewind);
@@ -599,7 +610,7 @@ input_curl_headerfunction(void *ptr, size_t size, size_t nmemb, void *stream)
 			tag_free(c->tag);
 
 		c->tag = tag_new();
-		tag_add_item(c->tag, TAG_ITEM_NAME, c->meta_name);
+		tag_add_item(c->tag, TAG_NAME, c->meta_name);
 	} else if (g_ascii_strcasecmp(name, "icy-metaint") == 0) {
 		char buffer[64];
 		size_t icy_metaint;
@@ -757,7 +768,7 @@ input_curl_can_rewind(struct input_stream *is)
 	/* rewind is possible if this is the very first buffer of the
 	   resource */
 	buffer = (struct buffer*)g_queue_peek_head(c->buffers);
-	return (off_t)buffer->consumed == is->offset;
+	return (goffset)buffer->consumed == is->offset;
 }
 
 static void
@@ -765,7 +776,7 @@ input_curl_rewind(struct input_stream *is)
 {
 	struct input_curl *c = is->data;
 #ifndef NDEBUG
-	off_t offset = 0;
+	goffset offset = 0;
 #endif
 
 	assert(c->rewind != NULL);
@@ -803,7 +814,7 @@ input_curl_rewind(struct input_stream *is)
 }
 
 static bool
-input_curl_seek(struct input_stream *is, off_t offset, int whence)
+input_curl_seek(struct input_stream *is, goffset offset, int whence)
 {
 	struct input_curl *c = is->data;
 	bool ret;
@@ -869,7 +880,7 @@ input_curl_seek(struct input_stream *is, off_t offset, int whence)
 		buffer = (struct buffer *)g_queue_pop_head(c->buffers);
 
 		length = buffer->size - buffer->consumed;
-		if (offset - is->offset < (off_t)length)
+		if (offset - is->offset < (goffset)length)
 			length = offset - is->offset;
 
 		buffer = consume_buffer(buffer, length, rewind_buffers);

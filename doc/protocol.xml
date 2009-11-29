@@ -67,6 +67,20 @@
         successful command executed in the command list.
       </para>
     </section>
+
+    <section>
+      <title>Ranges</title>
+
+      <para>
+        Some commands (e.g. <link
+        linkend="command_delete"><command>delete</command></link>)
+        allow specifying a range in the form
+        <parameter>START:END</parameter> (the <varname>END</varname>
+        item is not included in the range, similar to ranges in the
+        Python programming language).  If <varname>END</varname> is
+        omitted, then the maximum possible value is assumed.
+      </para>
+    </section>
   </chapter>
 
   <chapter>
@@ -123,7 +137,7 @@
           </term>
           <listitem>
             <para>
-              <footnote id="since_0_14"><simpara>Since MPD 0.14</simpara></footnote>
+              <footnote id="since_0_14"><simpara>Introduced with MPD 0.14</simpara></footnote>
               Waits until there is a noteworthy change in one or more
               of MPD's subsystems.  As soon as there is one, it lists
               all changed systems in a line in the format
@@ -181,7 +195,7 @@
                 <para>
                   <returnvalue>options</returnvalue>: options like
                   <option>repeat</option>, <option>random</option>,
-                  <option>crossfade</option>
+                  <option>crossfade</option>, replay gain
                 </para>
               </listitem>
             </itemizedlist>
@@ -200,9 +214,6 @@
               MPD will only send notifications when something changed in
               one of the specified subsytems.
             </para>
-            <simpara>
-              Since <application>MPD</application> 0.14
-            </simpara>
           </listitem>
         </varlistentry>
         <varlistentry id="command_status">
@@ -232,15 +243,15 @@
               <listitem>
                <para>
                 <varname>single</varname>:
+                <footnote id="since_0_15"><simpara>Introduced with MPD 0.15</simpara></footnote>
                 <returnvalue>0 or 1</returnvalue>
-                <footnote id="since_0_15"><simpara>Since MPD 0.15</simpara></footnote>
                </para>
               </listitem>
               <listitem>
                <para>
                 <varname>consume</varname>:
-                <returnvalue>0 or 1</returnvalue>
                 <footnoteref linkend="since_0_15"/>
+                <returnvalue>0 or 1</returnvalue>
                </para>
               </listitem>
               <listitem>
@@ -281,6 +292,24 @@
               </listitem>
               <listitem>
                 <para>
+                  <varname>nextsong</varname>:
+                  <footnoteref linkend="since_0_15"/>
+                  <returnvalue> playlist song number of the next
+                  song to be played
+                  </returnvalue>
+                </para>
+              </listitem>
+              <listitem>
+                <para>
+                  <varname>nextsongid</varname>:
+                  <footnoteref linkend="since_0_15"/>
+                  <returnvalue>playlist songid of the next song
+                  to be played
+                  </returnvalue>
+                </para>
+              </listitem>
+              <listitem>
+                <para>
                   <varname>time</varname>:
                   <returnvalue>total time elapsed (of current
                   playing/paused song)</returnvalue>
@@ -289,7 +318,7 @@
               <listitem>
                 <para>
                   <varname>elapsed</varname>:
-                  <footnote id="since_0_16"><simpara>Since MPD 0.16</simpara></footnote>
+                  <footnote id="since_0_16"><simpara>Introduced with MPD 0.16</simpara></footnote>
                   <returnvalue>
                     Total time elapsed within the current song, but
                     with higher resolution.
@@ -472,6 +501,45 @@
             </para>
           </listitem>
         </varlistentry>
+        <varlistentry id="command_replay_gain_mode">
+          <term>
+            <cmdsynopsis>
+              <command>replay_gain_mode</command>
+              <arg choice="req"><replaceable>MODE</replaceable></arg>
+            </cmdsynopsis>
+          </term>
+          <listitem>
+            <para>
+              Sets the replay gain mode.  One of
+              <parameter>off</parameter>,
+              <parameter>track</parameter>,
+              <parameter>album</parameter>.
+            </para>
+            <para>
+              Changing the mode during playback may take several
+              seconds, because the new settings does not affect the
+              buffered data.
+            </para>
+            <para>
+              This command triggers the
+              <returnvalue>options</returnvalue> idle event.
+            </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry id="command_replay_gain_status">
+          <term>
+            <cmdsynopsis>
+              <command>replay_gain_status</command>
+            </cmdsynopsis>
+          </term>
+          <listitem>
+            <para>
+              Prints replay gain options.  Currently, only the
+              variable <varname>replay_gain_mode</varname> is
+              returned.
+            </para>
+          </listitem>
+        </varlistentry>
       </variablelist>
     </section>
 
@@ -630,10 +698,7 @@
             </para>
             <para>
               <varname>URI</varname> is always a single file or
-              URL.  <varname>POSITION</varname> is optional, a
-              negative number means it is relative to the currently
-              playing song in the playlist (if there is one).
-              For example:
+              URL.  For example:
             </para>
             <screen>
 addid "foo.mp3"
@@ -658,7 +723,10 @@ OK
           <term>
             <cmdsynopsis>
               <command>delete</command>
-              <arg choice="req"><replaceable>SONGPOS</replaceable></arg>
+              <group>
+                <arg choice="req"><replaceable>POS</replaceable></arg>
+                <arg choice="req"><replaceable>START:END</replaceable></arg>
+              </group>
             </cmdsynopsis>
           </term>
           <listitem>
@@ -1100,6 +1168,23 @@ OK
             </para>
           </listitem>
         </varlistentry>
+        <varlistentry id="command_findadd">
+          <term>
+            <cmdsynopsis>
+              <command>findadd</command>
+              <arg choice="req"><replaceable>TYPE</replaceable></arg>
+              <arg choice="req"><replaceable>WHAT</replaceable></arg>
+            </cmdsynopsis>
+          </term>
+          <listitem>
+            <para>
+              Finds songs in the db that are exactly
+              <varname>WHAT</varname> and adds them to current playlist.
+              <varname>TYPE</varname> can be any tag supported by MPD.
+              <varname>WHAT</varname> is what to find.
+            </para>
+          </listitem>
+        </varlistentry>
         <varlistentry id="command_list">
           <term>
             <cmdsynopsis>
@@ -1192,29 +1277,38 @@ OK
           <term>
             <cmdsynopsis>
               <command>update</command>
-              <arg><replaceable>URI</replaceable></arg>
+              <arg choice="opt"><replaceable>URI</replaceable></arg>
             </cmdsynopsis>
           </term>
           <listitem>
             <para>
-              Updates the music database.
+              Updates the music database: find new files, remove
+              deleted files, update modified files.
             </para>
             <para>
               <varname>URI</varname> is a particular directory or
-              song/file to update.
+              song/file to update.  If you do not specify it,
+              everything is updated.
             </para>
             <para>
               Prints "updating_db: JOBID" where
-              <varname>JOBID</varname> is the job id requested for
-              your update, and is displayed in status, while the
-              requested update is happening.
+              <varname>JOBID</varname> is a positive number
+              identifying the update job.  You can read the current
+              job id in the <command>status</command> response.
             </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry id="command_rescan">
+          <term>
+            <cmdsynopsis>
+              <command>rescan</command>
+              <arg choice="opt"><replaceable>URI</replaceable></arg>
+            </cmdsynopsis>
+          </term>
+          <listitem>
             <para>
-              To update a number of paths/songs at once, use
-              command_list, it will be much more faster/efficient.
-              Also, if you use a command_list for updating, only one
-              <command>update</command> job id will be returned per
-              sequence of updates.
+              Same as <command>update</command>, but also rescans
+              unmodified files.
             </para>
           </listitem>
         </varlistentry>
@@ -1493,6 +1587,25 @@ OK
             <para>
               Gets a list of available URL handlers.
             </para>
+          </listitem>
+        </varlistentry>
+        <varlistentry id="command_decoders">
+          <term>
+            <cmdsynopsis>
+              <command>decoders</command>
+            </cmdsynopsis>
+          </term>
+          <listitem>
+            <para>
+              Print a list of decoder plugins, followed by their
+              supported suffixes and MIME types.  Example response:
+            </para>
+            <programlisting>plugin: mad
+suffix: mp3
+suffix: mp2
+mime_type: audio/mpeg
+plugin: mpcdec
+suffix: mpc</programlisting>
           </listitem>
         </varlistentry>
       </variablelist>

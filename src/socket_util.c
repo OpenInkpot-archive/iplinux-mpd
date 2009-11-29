@@ -17,8 +17,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
-#include "socket_util.h"
 #include "config.h"
+#include "socket_util.h"
+#include "fd_util.h"
 
 #include <errno.h>
 #include <unistd.h>
@@ -102,7 +103,7 @@ socket_bind_listen(int domain, int type, int protocol,
 	int passcred = 1;
 #endif
 
-	fd = socket(domain, type, protocol);
+	fd = socket_cloexec_nonblock(domain, type, protocol);
 	if (fd < 0) {
 		g_set_error(error, listen_quark(), errno,
 			    "Failed to create socket: %s", g_strerror(errno));

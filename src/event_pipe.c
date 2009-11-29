@@ -17,8 +17,9 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "event_pipe.h"
-#include "utils.h"
+#include "fd_util.h"
 
 #include <stdbool.h>
 #include <assert.h>
@@ -84,17 +85,9 @@ void event_pipe_init(void)
 	GIOChannel *channel;
 	int ret;
 
-#ifdef WIN32
-	ret = _pipe(event_pipe, 512, _O_BINARY);
-#else
-	ret = pipe(event_pipe);
-#endif
+	ret = pipe_cloexec_nonblock(event_pipe);
 	if (ret < 0)
 		g_error("Couldn't open pipe: %s", strerror(errno));
-#ifndef WIN32
-	if (set_nonblocking(event_pipe[1]) < 0)
-		g_error("Couldn't set non-blocking I/O: %s", strerror(errno));
-#endif
 
 	channel = g_io_channel_unix_new(event_pipe[0]);
 	event_pipe_source_id = g_io_add_watch(channel, G_IO_IN,

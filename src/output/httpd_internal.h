@@ -30,10 +30,17 @@
 #include <glib.h>
 
 #include <sys/socket.h>
+#include <stdbool.h>
 
 struct httpd_client;
 
 struct httpd_output {
+	/**
+	 * True if the audio output is open and accepts client
+	 * connections.
+	 */
+	bool open;
+
 	/**
 	 * The configured encoder plugin.
 	 */
@@ -97,6 +104,12 @@ struct httpd_output {
 	 * function.
 	 */
 	char buffer[32768];
+
+	/**
+	 * The maximum and current number of clients connected 
+	 * at the same time.
+	 */
+	guint clients_max, clients_cnt;
 };
 
 /**

@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "encoder_list.h"
 #include "encoder_plugin.h"
 #include "audio_format.h"
@@ -73,7 +74,7 @@ int main(int argc, char **argv)
 	}
 
 	param = config_new_param(NULL, -1);
-	config_add_block_param(param, "quality", "5.0", -1);
+	config_add_block_param(param, "quality", "5.0", -1, NULL);
 
 	encoder = encoder_init(plugin, param, &error);
 	if (encoder == NULL) {
@@ -86,7 +87,8 @@ int main(int argc, char **argv)
 	/* open the encoder */
 
 	if (argc > 2) {
-		ret = audio_format_parse(&audio_format, argv[2], &error);
+		ret = audio_format_parse(&audio_format, argv[2],
+					 false, &error);
 		if (!ret) {
 			g_printerr("Failed to parse audio format: %s\n",
 				   error->message);

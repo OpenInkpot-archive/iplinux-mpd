@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "tag.h"
 #include "tag_internal.h"
 #include "tag_pool.h"
@@ -42,20 +43,20 @@ static struct {
 } bulk;
 
 const char *tag_item_names[TAG_NUM_OF_ITEM_TYPES] = {
-	"Artist",
+	[TAG_ARTIST] = "Artist",
 	[TAG_ARTIST_SORT] = "ArtistSort",
-	"Album",
-	"AlbumArtist",
+	[TAG_ALBUM] = "Album",
+	[TAG_ALBUM_ARTIST] = "AlbumArtist",
 	[TAG_ALBUM_ARTIST_SORT] = "AlbumArtistSort",
-	"Title",
-	"Track",
-	"Name",
-	"Genre",
-	"Date",
-	"Composer",
-	"Performer",
-	"Comment",
-	"Disc",
+	[TAG_TITLE] = "Title",
+	[TAG_TRACK] = "Track",
+	[TAG_NAME] = "Name",
+	[TAG_GENRE] = "Genre",
+	[TAG_DATE] = "Date",
+	[TAG_COMPOSER] = "Composer",
+	[TAG_PERFORMER] = "Performer",
+	[TAG_COMMENT] = "Comment",
+	[TAG_DISC] = "Disc",
 
 	/* MusicBrainz tags from http://musicbrainz.org/doc/MusicBrainzTag */
 	[TAG_MUSICBRAINZ_ARTISTID] = "MUSICBRAINZ_ARTISTID",
@@ -65,6 +66,36 @@ const char *tag_item_names[TAG_NUM_OF_ITEM_TYPES] = {
 };
 
 bool ignore_tag_items[TAG_NUM_OF_ITEM_TYPES];
+
+enum tag_type
+tag_name_parse(const char *name)
+{
+	assert(name != NULL);
+
+	for (unsigned i = 0; i < TAG_NUM_OF_ITEM_TYPES; ++i) {
+		assert(tag_item_names[i] != NULL);
+
+		if (strcmp(name, tag_item_names[i]) == 0)
+			return (enum tag_type)i;
+	}
+
+	return TAG_NUM_OF_ITEM_TYPES;
+}
+
+enum tag_type
+tag_name_parse_i(const char *name)
+{
+	assert(name != NULL);
+
+	for (unsigned i = 0; i < TAG_NUM_OF_ITEM_TYPES; ++i) {
+		assert(tag_item_names[i] != NULL);
+
+		if (g_ascii_strcasecmp(name, tag_item_names[i]) == 0)
+			return (enum tag_type)i;
+	}
+
+	return TAG_NUM_OF_ITEM_TYPES;
+}
 
 static size_t items_size(const struct tag *tag)
 {
@@ -78,12 +109,12 @@ void tag_lib_init(void)
 	char *temp;
 	char *s;
 	char *c;
-	int i;
+	enum tag_type type;
 
 	/* parse the "metadata_to_use" config parameter below */
 
 	/* ignore comments by default */
-	ignore_tag_items[TAG_ITEM_COMMENT] = true;
+	ignore_tag_items[TAG_COMMENT] = true;
 
 	value = config_get_string(CONF_METADATA_TO_USE, NULL);
 	if (value == NULL)
@@ -100,16 +131,18 @@ void tag_lib_init(void)
 			if (*s == '\0')
 				quit = 1;
 			*s = '\0';
-			for (i = 0; i < TAG_NUM_OF_ITEM_TYPES; i++) {
-				if (g_ascii_strcasecmp(c, tag_item_names[i]) == 0) {
-					ignore_tag_items[i] = false;
-					break;
-				}
-			}
-			if (strlen(c) && i == TAG_NUM_OF_ITEM_TYPES) {
+
+			c = g_strstrip(c);
+			if (*c == 0)
+				continue;
+
+			type = tag_name_parse_i(c);
+			if (type == TAG_NUM_OF_ITEM_TYPES)
 				g_error("error parsing metadata item \"%s\"",
 					c);
-			}
+
+			ignore_tag_items[type] = false;
+
 			s++;
 			c = s;
 		}

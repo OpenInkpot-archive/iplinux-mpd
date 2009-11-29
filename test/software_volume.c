@@ -23,6 +23,7 @@
  *
  */
 
+#include "config.h"
 #include "pcm_volume.h"
 #include "audio_parser.h"
 #include "audio_format.h"
@@ -41,22 +42,28 @@ int main(int argc, char **argv)
 	ssize_t nbytes;
 
 	if (argc > 2) {
-		g_printerr("Usage: software_voluem [FORMAT] <IN >OUT\n");
+		g_printerr("Usage: software_volume [FORMAT] <IN >OUT\n");
 		return 1;
 	}
 
 	if (argc > 1) {
-		ret = audio_format_parse(&audio_format, argv[1], &error);
+		ret = audio_format_parse(&audio_format, argv[1],
+					 false, &error);
 		if (!ret) {
 			g_printerr("Failed to parse audio format: %s\n",
 				   error->message);
 			return 1;
 		}
-	}
-	audio_format_init(&audio_format, 48000, 16, 2);
+	} else
+		audio_format_init(&audio_format, 48000, 16, 2);
 
 	while ((nbytes = read(0, buffer, sizeof(buffer))) > 0) {
-		pcm_volume(buffer, nbytes, &audio_format, PCM_VOLUME_1 / 2);
+		if (!pcm_volume(buffer, nbytes, &audio_format,
+				PCM_VOLUME_1 / 2)) {
+			g_printerr("pcm_volume() has failed\n");
+			return 2;
+		}
+
 		write(1, buffer, nbytes);
 	}
 }

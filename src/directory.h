@@ -20,6 +20,7 @@
 #ifndef MPD_DIRECTORY_H
 #define MPD_DIRECTORY_H
 
+#include "check.h"
 #include "dirvec.h"
 #include "songvec.h"
 

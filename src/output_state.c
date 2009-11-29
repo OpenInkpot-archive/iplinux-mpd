@@ -22,6 +22,7 @@
  *
  */
 
+#include "config.h"
 #include "output_state.h"
 #include "output_internal.h"
 #include "output_all.h"
@@ -34,8 +35,10 @@
 
 #define AUDIO_DEVICE_STATE "audio_device_state:"
 
+unsigned audio_output_state_version;
+
 void
-saveAudioDevicesState(FILE *fp)
+audio_output_state_save(FILE *fp)
 {
 	unsigned n = audio_output_count();
 
@@ -50,7 +53,7 @@ saveAudioDevicesState(FILE *fp)
 }
 
 bool
-readAudioDevicesState(const char *line)
+audio_output_state_read(const char *line)
 {
 	long value;
 	char *endptr;
@@ -79,4 +82,10 @@ readAudioDevicesState(const char *line)
 
 	ao->enabled = false;
 	return true;
+}
+
+unsigned
+audio_output_state_get_version(void)
+{
+	return audio_output_state_version;
 }

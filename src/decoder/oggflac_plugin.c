@@ -21,19 +21,18 @@
  * OggFLAC support (half-stolen from flac_plugin.c :))
  */
 
+#include "config.h" /* must be first for large file support */
 #include "_flac_common.h"
 #include "_ogg_common.h"
+#include "flac_metadata.h"
 
 #include <glib.h>
 #include <OggFLAC/seekable_stream_decoder.h>
 #include <assert.h>
 #include <unistd.h>
 
-static void oggflac_cleanup(struct flac_data *data,
-			    OggFLAC__SeekableStreamDecoder * decoder)
+static void oggflac_cleanup(OggFLAC__SeekableStreamDecoder * decoder)
 {
-	if (data->replay_gain_info)
-		replay_gain_info_free(data->replay_gain_info);
 	if (decoder)
 		OggFLAC__seekable_stream_decoder_delete(decoder);
 }
@@ -156,13 +155,8 @@ oggflac_write_cb(G_GNUC_UNUSED const OggFLAC__SeekableStreamDecoder *decoder,
 		 void *vdata)
 {
 	struct flac_data *data = (struct flac_data *) vdata;
-	FLAC__uint32 samples = frame->header.blocksize;
-	float time_change;
 
-	time_change = ((float)samples) / frame->header.sample_rate;
-	data->time += time_change;
-
-	return flac_common_write(data, frame, buf);
+	return flac_common_write(data, frame, buf, 0);
 }
 
 /* used by TagDup */
@@ -173,17 +167,7 @@ static void of_metadata_dup_cb(G_GNUC_UNUSED const OggFLAC__SeekableStreamDecode
 
 	assert(data->tag != NULL);
 
-	switch (block->type) {
-	case FLAC__METADATA_TYPE_STREAMINFO:
-		data->tag->time = ((float)block->data.stream_info.
-				   total_samples) /
-		    block->data.stream_info.sample_rate + 0.5;
-		return;
-	case FLAC__METADATA_TYPE_VORBIS_COMMENT:
-		flac_vorbis_comments_to_tag(data->tag, NULL, block);
-	default:
-		break;
-	}
+	flac_tag_apply_metadata(data->tag, NULL, block);
 }
 
 /* used by decode */
@@ -264,6 +248,7 @@ oggflac_tag_dup(const char *file)
 	struct input_stream input_stream;
 	OggFLAC__SeekableStreamDecoder *decoder;
 	struct flac_data data;
+	struct tag *tag;
 
 	if (!input_stream_open(&input_stream, file))
 		return NULL;
@@ -271,6 +256,10 @@ oggflac_tag_dup(const char *file)
 		input_stream_close(&input_stream);
 		return NULL;
 	}
+
+	/* rewind the stream, because ogg_stream_type_detect() has
+	   moved it */
+	input_stream_seek(&input_stream, 0, SEEK_SET);
 
 	flac_data_init(&data, NULL, &input_stream);
 
@@ -280,15 +269,18 @@ oggflac_tag_dup(const char *file)
 	 * data.tag will be set or unset, that's all we care about */
 	decoder = full_decoder_init_and_read_metadata(&data, 1);
 
-	oggflac_cleanup(&data, decoder);
+	oggflac_cleanup(decoder);
 	input_stream_close(&input_stream);
 
-	if (!tag_is_defined(data.tag)) {
-		tag_free(data.tag);
+	if (tag_is_defined(data.tag)) {
+		tag = data.tag;
 		data.tag = NULL;
-	}
+	} else
+		tag = NULL;
 
-	return data.tag;
+	flac_data_deinit(&data);
+
+	return tag;
 }
 
 static void
@@ -296,9 +288,14 @@ oggflac_decode(struct decoder * mpd_decoder, struct input_stream *input_stream)
 {
 	OggFLAC__SeekableStreamDecoder *decoder = NULL;
 	struct flac_data data;
+	struct audio_format audio_format;
 
 	if (ogg_stream_type_detect(input_stream) != FLAC)
 		return;
+
+	/* rewind the stream, because ogg_stream_type_detect() has
+	   moved it */
+	input_stream_seek(input_stream, 0, SEEK_SET);
 
 	flac_data_init(&data, mpd_decoder, input_stream);
 
@@ -306,16 +303,13 @@ oggflac_decode(struct decoder * mpd_decoder, struct input_stream *input_stream)
 		goto fail;
 	}
 
-	if (!audio_format_valid(&data.audio_format)) {
-		g_warning("Invalid audio format: %u:%u:%u\n",
-			  data.audio_format.sample_rate,
-			  data.audio_format.bits,
-			  data.audio_format.channels);
+	if (!flac_data_get_audio_format(&data, &audio_format))
 		goto fail;
-	}
 
-	decoder_initialized(mpd_decoder, &data.audio_format,
-			    input_stream->seekable, data.total_time);
+	decoder_initialized(mpd_decoder, &audio_format,
+			    input_stream->seekable,
+			    (float)data.stream_info.total_samples /
+			    (float)data.stream_info.sample_rate);
 
 	while (true) {
 		OggFLAC__seekable_stream_decoder_process_single(decoder);
@@ -325,11 +319,10 @@ oggflac_decode(struct decoder * mpd_decoder, struct input_stream *input_stream)
 		}
 		if (decoder_get_command(mpd_decoder) == DECODE_COMMAND_SEEK) {
 			FLAC__uint64 seek_sample = decoder_seek_where(mpd_decoder) *
-			    data.audio_format.sample_rate + 0.5;
+			    data.stream_info.sample_rate;
 			if (OggFLAC__seekable_stream_decoder_seek_absolute
 			    (decoder, seek_sample)) {
-				data.time = ((float)seek_sample) /
-				    data.audio_format.sample_rate;
+				data.next_frame = seek_sample;
 				data.position = 0;
 				decoder_command_finished(mpd_decoder);
 			} else
@@ -344,7 +337,8 @@ oggflac_decode(struct decoder * mpd_decoder, struct input_stream *input_stream)
 	}
 
 fail:
-	oggflac_cleanup(&data, decoder);
+	oggflac_cleanup(decoder);
+	flac_data_deinit(&data);
 }
 
 static const char *const oggflac_suffixes[] = { "ogg", "oga", NULL };

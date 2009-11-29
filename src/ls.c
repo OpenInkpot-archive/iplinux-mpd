@@ -17,10 +17,10 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include "config.h"
 #include "ls.h"
 #include "uri.h"
 #include "client.h"
-#include "config.h"
 
 #include <assert.h>
 #include <string.h>
@@ -32,11 +32,8 @@
   * connected by IPC socket.
   */
 static const char *remoteUrlPrefixes[] = {
-#ifdef HAVE_CURL
+#ifdef ENABLE_CURL
 	"http://",
-#endif
-#ifdef ENABLE_LASTFM
-	"lastfm://",
 #endif
 #ifdef ENABLE_MMS
 	"mms://",
