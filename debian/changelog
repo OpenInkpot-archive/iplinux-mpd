@@ -1,3 +1,10 @@
+mpd (0.15.6-1.ip1) asimov; urgency=low
+
+  * Fix bug with "not play at startup"
+  * Fix "wrong encoding in id3v2" (ported from libextractor)
+
+ -- Alexander V. Nikolaev <avn@daemon.hole.ru>  Mon, 30 Nov 2009 06:04:06 +0200
+
 mpd (0.15.1-1.ip2) asimov; urgency=low
 
   * Missed build dependency on libid3tag0
