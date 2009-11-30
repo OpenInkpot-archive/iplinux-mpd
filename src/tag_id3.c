@@ -77,45 +77,126 @@ tag_id3_getstring(const struct id3_frame *frame, unsigned i)
 	return id3_ucs4_utf8duplicate(ucs4);
 }
 
+
+static id3_utf8_t *
+import_8bit_string(id3_latin1_t* isostr, const char* encoding)
+{
+    id3_utf8_t* utf8 = (id3_utf8_t *)
+        g_convert_with_fallback((const char*)isostr,
+                        strlen((const char *) isostr),
+                        "utf-8",
+                        encoding,
+                        NULL, NULL, NULL, NULL);
+    if (utf8 == NULL) {
+        g_debug("Unable to convert %s string to UTF-8: '%s'", encoding, isostr);
+    }
+    return utf8;
+}
+
+/* Cut-n-paste from OI libextractor-oi-extras/src/plugins/mp3/utf8.c */
+#define bit(i) (1<<i)
+static
+int check_utf8(const unsigned char *buf, int len) {
+    long i,j;
+    int bytes=0,rflag=0;
+    unsigned char tmp;
+    int res=0;
+
+    for (i=0;i<len;i++) {
+    if (buf[i]<128) continue;
+
+    if (bytes>0) {
+        if ((buf[i]&0xC0)==0x80) {
+        if (rflag) {
+            tmp=buf[i]&0x3F;
+            // Russian is 0x410-0x44F
+            if ((rflag==1)&&(tmp>=0x10)) res++;
+            else if ((rflag==2)&&(tmp<=0x0F)) res++;
+        }
+        bytes--;
+        } else {
+        res--;
+        bytes=1-bytes;
+        rflag=0;
+        }
+    } else {
+        for (j=6;j>=0;j--)
+        if ((buf[i]&bit(j))==0) break;
+
+        if ((j==0)||(j==6)) {
+        if ((j==6)&&(bytes<0)) bytes++;
+        else res--;
+        continue;
+        }
+        bytes=6-j;
+        if (bytes==1) {
+        // Cyrrilic D0-D3, Russian - D0-D1
+        if (buf[i]==0xD0) rflag=1;
+        else if (buf[i]==0xD1) rflag=2;
+        }
+    }
+
+    if ((buf[i]==0xD0)||(buf[i]==0xD1)) {
+        if (i+1==len) break;
+
+    }
+    }
+//    printf("check_utf8: %d : %s\n", res, buf);
+    return res > 1;
+}
+#undef bit
+/* end cut-n-paste */
+
 /* This will try to convert a string to utf-8,
  */
 static id3_utf8_t *
 import_id3_string(bool is_id3v1, const id3_ucs4_t *ucs4)
 {
-	id3_utf8_t *utf8, *utf8_stripped;
-	id3_latin1_t *isostr;
-	const char *encoding;
+    id3_utf8_t *utf8, *utf8_stripped = NULL;
+    id3_latin1_t *isostr;
+    const char *encoding;
+    bool is_utf8;
 
-	/* use encoding field here? */
-	if (is_id3v1 &&
-	    (encoding = config_get_string(CONF_ID3V1_ENCODING, NULL)) != NULL) {
-		isostr = id3_ucs4_latin1duplicate(ucs4);
-		if (G_UNLIKELY(!isostr)) {
-			return NULL;
-		}
+    encoding = config_get_string(CONF_ID3V1_ENCODING, NULL);
+    isostr = id3_ucs4_latin1duplicate(ucs4);
+    if (G_UNLIKELY(!isostr)) {
+        return NULL;
+    }
+    is_utf8 = check_utf8((const unsigned char *)isostr,
+        strlen((const char *)isostr));
 
-		utf8 = (id3_utf8_t *)
-			g_convert_with_fallback((const char*)isostr, -1,
-						encoding, "utf-8",
-						NULL, NULL, NULL, NULL);
-		if (utf8 == NULL) {
-			g_debug("Unable to convert %s string to UTF-8: '%s'",
-				encoding, isostr);
-			g_free(isostr);
-			return NULL;
-		}
-		g_free(isostr);
-	} else {
-		utf8 = id3_ucs4_utf8duplicate(ucs4);
-		if (G_UNLIKELY(!utf8)) {
-			return NULL;
-		}
-	}
+    if(is_utf8) {
+        utf8 = id3_ucs4_utf8duplicate(ucs4);
+        goto done;
+    }
 
-	utf8_stripped = (id3_utf8_t *)g_strdup(g_strstrip((gchar *)utf8));
-	g_free(utf8);
+    /* use encoding field here? */
+    if (is_id3v1 && encoding) {
+        utf8 = import_8bit_string(isostr, encoding);
+    } else {
+        utf8 = id3_ucs4_utf8duplicate(ucs4);
+        if(!check_utf8((unsigned char *)utf8, strlen((const char *)utf8))
+            && encoding)
+        {
+            id3_utf8_t *tmp = import_8bit_string(isostr, encoding);
+            if(tmp)
+            {
+                g_free(utf8);
+                utf8 = tmp;
+            }
+        }
+    }
 
-	return utf8_stripped;
+done:
+    if(isostr)
+        g_free(isostr);
+    if(utf8) {
+        utf8_stripped = (id3_utf8_t *)g_strdup(g_strstrip((gchar *)utf8));
+        g_free(utf8);
+        return utf8_stripped;
+    }
+    return NULL;
+
 }
 
 /**
