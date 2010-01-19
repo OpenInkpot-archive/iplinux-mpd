@@ -1,3 +1,9 @@
+mpd (0.15.6-1.ip1+b1) zelazny; urgency=low
+
+  * Rebuild due to updated glib2.0
+
+ -- Mikhail Gusarov <dottedmag@dottedmag.net>  Tue, 19 Jan 2010 07:34:37 +0600
+
 mpd (0.15.6-1.ip1) asimov; urgency=low
 
   * Fix bug with "not play at startup"
