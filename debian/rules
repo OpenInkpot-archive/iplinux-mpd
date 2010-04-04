@@ -3,7 +3,7 @@ ARCH=$(shell dpkg-architecture -qDEB_HOST_ARCH)
 WITH_TREMOR=--with-tremor
 
 DEB_BUILDDIR := debian/build
-DEB_CONFIGURE_USER_FLAGS += $(WITH_TREMOR) --disable-sqlite --enable-un --disable-ao --disable-oss --disable-httpd --disable-jack --disable-fifo --disable-mms --disable-lame-encoder --disable-curl --disable-ipv6 
+DEB_CONFIGURE_USER_FLAGS += $(WITH_TREMOR) --disable-sqlite --enable-un --disable-ao --disable-oss --disable-httpd --disable-jack --disable-fifo --disable-mms --disable-lame-encoder --disable-curl --disable-ipv6 --disable-sndfile --enable-audiofile 
 LDFLAGS += -Wl,--as-needed
 
 include /usr/share/cdbs/1/rules/debhelper.mk
