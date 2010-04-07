@@ -205,6 +205,21 @@ dnl ##
 dnl misc libraries
 dnl ##
 
+AC_ARG_ENABLE([libwrap],
+	AS_HELP_STRING([--enable-libwrap], [use libwrap]),,
+	[enable_libwrap=auto])
+
+if test x$enable_libwrap != xno; then
+	AC_CHECK_LIBWRAP(found_libwrap=yes, found_libwrap=no)
+	MPD_AUTO_RESULT(libwrap, libwrap, [libwrap not found])
+fi
+
+if test x$enable_libwrap = xyes; then
+	AC_SUBST(LIBWRAP_CFLAGS)
+	AC_SUBST(LIBWRAP_LDFLAGS)
+	AC_DEFINE(HAVE_LIBWRAP, 1, [define to enable libwrap library])
+fi
+
 AC_ARG_ENABLE(cue,
 	AS_HELP_STRING([--enable-cue],
 		[enable support for libcue support]),,
@@ -353,21 +368,33 @@ fi
 AM_CONDITIONAL(HAVE_BZ2, test x$enable_bzip2 = xyes)
 if test x$enable_bzip2 = xyes; then
 	AC_DEFINE(HAVE_BZ2, 1, [Define to have bz2 archive support])
+
+	AC_PATH_PROG(BZIP2, bzip2, no)
+else
+	BZIP2="no"
 fi
 
-dnl zip
-AC_ARG_ENABLE(zip,
-	AS_HELP_STRING([--enable-zip],
-		[enable zip archive support (default: disabled)]),,
-	enable_zip=no)
+AM_CONDITIONAL(ENABLE_BZIP2_TEST, test x$BZIP2 != xno)
 
-MPD_AUTO_PKG(zip, ZZIP, [zziplib >= 0.13],
+dnl zzip
+AC_ARG_ENABLE(zzip,
+	AS_HELP_STRING([--enable-zzip],
+		[enable zip archive support (default: disabled)]),,
+	enable_zzip=no)
+
+MPD_AUTO_PKG(zzip, ZZIP, [zziplib >= 0.13],
 	[libzzip archive library], [libzzip not found])
 
-AM_CONDITIONAL(HAVE_ZIP, test x$enable_zip = xyes)
-if test x$enable_zip = xyes; then
-	AC_DEFINE(HAVE_ZIP, 1, [Define to have zip archive support])
+AM_CONDITIONAL(HAVE_ZZIP, test x$enable_zzip = xyes)
+if test x$enable_zzip = xyes; then
+	AC_DEFINE(HAVE_ZZIP, 1, [Define to have zip archive support])
+
+	AC_PATH_PROG(ZIP, zip, no)
+else
+	ZIP="no"
 fi
+
+AM_CONDITIONAL(ENABLE_ZZIP_TEST, test x$ZIP != xno)
 
 dnl iso9660
 AC_ARG_ENABLE(iso9660,
@@ -378,15 +405,21 @@ AC_ARG_ENABLE(iso9660,
 MPD_AUTO_PKG(iso9660, ISO9660, [libiso9660],
 	[libiso9660 archive library], [libiso9660 not found])
 
-AM_CONDITIONAL(HAVE_ISO, test x$enable_iso9660 = xyes)
+AM_CONDITIONAL(HAVE_ISO9660, test x$enable_iso9660 = xyes)
 if test x$enable_iso9660 = xyes; then
-	AC_DEFINE(HAVE_ISO, 1, [Define to have iso archive support])
+	AC_DEFINE(HAVE_ISO9660, 1, [Define to have ISO9660 archive support])
+
+	AC_PATH_PROG(MKISOFS, mkisofs, no)
+else
+	MKISOFS="no"
 fi
+
+AM_CONDITIONAL(ENABLE_ISO9660_TEST, test x$MKISOFS != xno)
 
 dnl archive API
 if
 	test x$enable_bzip2 = xyes ||
-	test x$enable_zip = xyes ||
+	test x$enable_zzip = xyes ||
 	test x$enable_iso9660 = xyes; then
 		enable_archive=yes
 		AC_DEFINE(ENABLE_ARCHIVE, 1, [The archive API is available])
@@ -811,6 +844,9 @@ fi
 
 AM_CONDITIONAL(HAVE_OSS, test x$enable_oss = xyes)
 
+AC_SUBST(OPENAL_CFLAGS,"")
+AC_SUBST(OPENAL_LIBS,"")
+
 if test x$enable_openal = xyes; then
 	if test x$enable_osx = xyes; then
 		AC_CHECK_HEADERS([OpenAL/al.h OpenAL/alc.h], [], [enable_openal=no])
@@ -825,11 +861,6 @@ if test x$enable_openal = xyes; then
 			AC_DEFINE(HAVE_OPENAL, 1, [Define for OpenAL support]),
 			enable_openal=no)
 	fi
-fi
-
-if test x$enable_openal = xyes; then
-	MPD_CFLAGS="$MPD_CFLAGS $OPENAL_CFLAGS"
-	MPD_LIBS="$MPD_LIBS $OPENAL_LIBS"
 fi
 
 AM_CONDITIONAL(HAVE_OPENAL, test x$enable_openal = xyes)
@@ -1286,7 +1317,6 @@ then
 	MPD_CHECK_FLAG([-Wextra])
 	MPD_CHECK_FLAG([-Wno-deprecated-declarations])
 	MPD_CHECK_FLAG([-Wmissing-prototypes])
-	MPD_CHECK_FLAG([-Wdeclaration-after-statement])
 	MPD_CHECK_FLAG([-Wshadow])
 	MPD_CHECK_FLAG([-Wpointer-arith])
 	MPD_CHECK_FLAG([-Wstrict-prototypes])
@@ -1625,7 +1655,7 @@ else
 	echo " ISO 9660 archives support .....disabled"
 fi
 
-if test x$enable_zip = xyes; then
+if test x$enable_zzip = xyes; then
 	echo " ZIP archives support ..........enabled"
 else
 	echo " ZIP archives support ..........disabled"

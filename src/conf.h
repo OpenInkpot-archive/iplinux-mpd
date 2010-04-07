@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -42,6 +42,7 @@
 #define CONF_PASSWORD                   "password"
 #define CONF_DEFAULT_PERMS              "default_permissions"
 #define CONF_AUDIO_OUTPUT               "audio_output"
+#define CONF_AUDIO_FILTER               "filter"
 #define CONF_AUDIO_OUTPUT_FORMAT        "audio_output_format"
 #define CONF_MIXER_TYPE                 "mixer_type"
 #define CONF_REPLAYGAIN                 "replaygain"
@@ -72,6 +73,8 @@
 
 #define DEFAULT_PLAYLIST_MAX_LENGTH (1024*16)
 #define DEFAULT_PLAYLIST_SAVE_ABSOLUTE_PATHS false
+
+#define MAX_FILTER_CHAIN_LENGTH 255
 
 struct block_param {
 	char *name;

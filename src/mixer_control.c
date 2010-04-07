@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -49,6 +49,10 @@ mixer_free(struct mixer *mixer)
 	assert(mixer != NULL);
 	assert(mixer->plugin != NULL);
 	assert(mixer->mutex != NULL);
+
+	/* mixers with the "global" flag set might still be open at
+	   this point (see mixer_auto_close()) */
+	mixer_close(mixer);
 
 	g_mutex_free(mixer->mutex);
 

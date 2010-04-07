@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -60,11 +60,21 @@ static void * update_task(void *_path)
 {
 	const char *path = _path;
 
+	if (path != NULL && *path != 0)
+		g_debug("starting: %s", path);
+	else
+		g_debug("starting");
+
 	modified = update_walk(path, discard);
-	g_free(_path);
 
 	if (modified || !db_exists())
 		db_save();
+
+	if (path != NULL && *path != 0)
+		g_debug("finished: %s", path);
+	else
+		g_debug("finished");
+	g_free(_path);
 
 	progress = UPDATE_PROGRESS_DONE;
 	event_pipe_emit(PIPE_EVENT_UPDATE);

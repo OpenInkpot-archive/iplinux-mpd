@@ -9,6 +9,7 @@ bin_PROGRAMS = src/mpd
 
 src_mpd_CFLAGS = $(AM_CFLAGS) $(MPD_CFLAGS)
 src_mpd_CPPFLAGS = $(AM_CPPFLAGS) \
+	$(LIBWRAP_CFLAGS) \
 	$(SQLITE_CFLAGS) \
 	$(ARCHIVE_CFLAGS) \
 	$(INPUT_CFLAGS) \
@@ -18,6 +19,7 @@ src_mpd_CPPFLAGS = $(AM_CPPFLAGS) \
 	$(FILTER_CFLAGS) \
 	$(OUTPUT_CFLAGS)
 src_mpd_LDADD = $(MPD_LIBS) \
+	$(LIBWRAP_LDFLAGS) \
 	$(SQLITE_LIBS) \
 	$(ARCHIVE_LIBS) \
 	$(INPUT_LIBS) \
@@ -47,10 +49,13 @@ mpd_headers = \
 	src/output_print.h \
 	src/output_command.h \
 	src/filter_internal.h \
+	src/filter_config.h \
 	src/filter_plugin.h \
 	src/filter_registry.h \
+	src/filter/autoconvert_filter_plugin.h \
 	src/filter/chain_filter_plugin.h \
 	src/filter/convert_filter_plugin.h \
+	src/filter/replay_gain_filter_plugin.h \
 	src/filter/volume_filter_plugin.h \
 	src/command.h \
 	src/idle.h \
@@ -76,6 +81,7 @@ mpd_headers = \
 	src/exclude.h \
 	src/fd_util.h \
 	src/fifo_buffer.h \
+	src/glib_compat.h \
 	src/update.h \
 	src/update_internal.h \
 	src/inotify_source.h \
@@ -90,10 +96,13 @@ mpd_headers = \
 	src/decoder/flac_pcm.h \
 	src/decoder/_flac_common.h \
 	src/decoder/_ogg_common.h \
+	src/input_init.h \
 	src/input_plugin.h \
+	src/input_registry.h \
 	src/input_stream.h \
 	src/input/file_input_plugin.h \
 	src/input/curl_input_plugin.h \
+	src/input/rewind_input_plugin.h \
 	src/input/mms_input_plugin.h \
 	src/text_file.h \
 	src/text_input_stream.h \
@@ -115,8 +124,8 @@ mpd_headers = \
 	src/mixer/software_mixer_plugin.h \
 	src/mixer/pulse_mixer_plugin.h \
 	src/daemon.h \
-	src/normalize.h \
-	src/compress.h \
+	src/AudioCompress/config.h \
+	src/AudioCompress/compress.h \
 	src/buffer.h \
 	src/pipe.h \
 	src/chunk.h \
@@ -137,6 +146,7 @@ mpd_headers = \
 	src/pcm_resample.h \
 	src/pcm_resample_internal.h \
 	src/pcm_dither.h \
+	src/pcm_pack.h \
 	src/pcm_prng.h \
 	src/permission.h \
 	src/player_thread.h \
@@ -148,6 +158,8 @@ mpd_headers = \
 	src/playlist_state.h \
 	src/playlist_plugin.h \
 	src/playlist_list.h \
+	src/playlist_mapper.h \
+	src/playlist_song.h \
 	src/playlist_queue.h \
 	src/playlist/extm3u_playlist_plugin.h \
 	src/playlist/m3u_playlist_plugin.h \
@@ -155,13 +167,16 @@ mpd_headers = \
 	src/playlist/xspf_playlist_plugin.h \
 	src/playlist/asx_playlist_plugin.h \
 	src/playlist/lastfm_playlist_plugin.h \
+	src/playlist/cue_playlist_plugin.h \
+	src/playlist/flac_playlist_plugin.h \
 	src/poison.h \
 	src/riff.h \
 	src/aiff.h \
 	src/queue.h \
 	src/queue_print.h \
 	src/queue_save.h \
-	src/replay_gain.h \
+	src/replay_gain_config.h \
+	src/replay_gain_info.h \
 	src/sig_handlers.h \
 	src/song.h \
 	src/song_print.h \
@@ -192,6 +207,10 @@ mpd_headers = \
 	src/archive_api.h \
 	src/archive_internal.h \
 	src/archive_list.h \
+	src/archive_plugin.h \
+	src/archive/bz2_archive_plugin.h \
+	src/archive/iso9660_archive_plugin.h \
+	src/archive/zzip_archive_plugin.h \
 	src/input/archive_input_plugin.h \
 	src/cue/cue_tag.h
 
@@ -230,6 +249,7 @@ src_mpd_SOURCES = \
 	src/exclude.c \
 	src/fd_util.c \
 	src/fifo_buffer.c \
+	src/filter_config.c \
 	src/filter_plugin.c \
 	src/filter_registry.c \
 	src/update.c \
@@ -252,8 +272,7 @@ src_mpd_SOURCES = \
 	src/main.c \
 	src/event_pipe.c \
 	src/daemon.c \
-	src/normalize.c \
-	src/compress.c \
+	src/AudioCompress/compress.c \
 	src/buffer.c \
 	src/pipe.c \
 	src/chunk.c \
@@ -265,6 +284,7 @@ src_mpd_SOURCES = \
 	src/pcm_mix.c \
 	src/pcm_byteswap.c \
 	src/pcm_channels.c \
+	src/pcm_pack.c \
 	src/pcm_format.c \
 	src/pcm_resample.c \
 	src/pcm_resample_fallback.c \
@@ -278,12 +298,15 @@ src_mpd_SOURCES = \
 	src/playlist_edit.c \
 	src/playlist_print.c \
 	src/playlist_save.c \
+	src/playlist_mapper.c \
+	src/playlist_song.c \
 	src/playlist_state.c \
 	src/playlist_queue.c \
 	src/queue.c \
 	src/queue_print.c \
 	src/queue_save.c \
-	src/replay_gain.c \
+	src/replay_gain_config.c \
+	src/replay_gain_info.c \
 	src/sig_handlers.c \
 	src/song.c \
 	src/song_update.c \
@@ -344,21 +367,22 @@ ARCHIVE_LIBS = \
 ARCHIVE_SRC =
 
 if HAVE_BZ2
-ARCHIVE_SRC += src/archive/bz2_plugin.c
+ARCHIVE_SRC += src/archive/bz2_archive_plugin.c
 endif
 
-if HAVE_ZIP
-ARCHIVE_SRC += src/archive/zip_plugin.c
+if HAVE_ZZIP
+ARCHIVE_SRC += src/archive/zzip_archive_plugin.c
 endif
 
-if HAVE_ISO
-ARCHIVE_SRC += src/archive/iso_plugin.c
+if HAVE_ISO9660
+ARCHIVE_SRC += src/archive/iso9660_archive_plugin.c
 endif
 
 if ENABLE_ARCHIVE
 ARCHIVE_SRC += \
 	src/archive_api.c \
 	src/archive_list.c \
+	src/archive_plugin.c \
 	src/input/archive_input_plugin.c
 endif
 
@@ -418,7 +442,7 @@ DECODER_SRC = \
 	src/decoder_list.c
 
 if HAVE_MAD
-DECODER_SRC += src/decoder/mad_plugin.c
+DECODER_SRC += src/decoder/mad_decoder_plugin.c
 endif
 
 if HAVE_MPG123
@@ -426,19 +450,19 @@ DECODER_SRC += src/decoder/mpg123_decoder_plugin.c
 endif
 
 if HAVE_MPCDEC
-DECODER_SRC += src/decoder/mpcdec_plugin.c
+DECODER_SRC += src/decoder/mpcdec_decoder_plugin.c
 endif
 
 if HAVE_WAVPACK
-DECODER_SRC += src/decoder/wavpack_plugin.c
+DECODER_SRC += src/decoder/wavpack_decoder_plugin.c
 endif
 
 if HAVE_FAAD
-DECODER_SRC += src/decoder/faad_plugin.c
+DECODER_SRC += src/decoder/faad_decoder_plugin.c
 endif
 
 if HAVE_MP4
-DECODER_SRC += src/decoder/mp4ff_plugin.c
+DECODER_SRC += src/decoder/mp4ff_decoder_plugin.c
 endif
 
 if HAVE_OGG_COMMON
@@ -453,43 +477,43 @@ DECODER_SRC += \
 endif
 
 if ENABLE_VORBIS_DECODER
-DECODER_SRC += src/decoder/vorbis_plugin.c
+DECODER_SRC += src/decoder/vorbis_decoder_plugin.c
 endif
 
 if HAVE_FLAC
-DECODER_SRC += src/decoder/flac_plugin.c
+DECODER_SRC += src/decoder/flac_decoder_plugin.c
 endif
 
 if HAVE_OGGFLAC
-DECODER_SRC += src/decoder/oggflac_plugin.c
+DECODER_SRC += src/decoder/oggflac_decoder_plugin.c
 endif
 
 if HAVE_AUDIOFILE
-DECODER_SRC += src/decoder/audiofile_plugin.c
+DECODER_SRC += src/decoder/audiofile_decoder_plugin.c
 endif
 
 if ENABLE_MIKMOD_DECODER
-DECODER_SRC += src/decoder/mikmod_plugin.c
+DECODER_SRC += src/decoder/mikmod_decoder_plugin.c
 endif
 
 if HAVE_MODPLUG
-DECODER_SRC += src/decoder/modplug_plugin.c
+DECODER_SRC += src/decoder/modplug_decoder_plugin.c
 endif
 
 if ENABLE_SIDPLAY
-DECODER_SRC += src/decoder/sidplay_plugin.cxx
+DECODER_SRC += src/decoder/sidplay_decoder_plugin.cxx
 endif
 
 if ENABLE_FLUIDSYNTH
-DECODER_SRC += src/decoder/fluidsynth_plugin.c
+DECODER_SRC += src/decoder/fluidsynth_decoder_plugin.c
 endif
 
 if ENABLE_WILDMIDI
-DECODER_SRC += src/decoder/wildmidi_plugin.c
+DECODER_SRC += src/decoder/wildmidi_decoder_plugin.c
 endif
 
 if HAVE_FFMPEG
-DECODER_SRC += src/decoder/ffmpeg_plugin.c
+DECODER_SRC += src/decoder/ffmpeg_decoder_plugin.c
 endif
 
 if ENABLE_SNDFILE
@@ -567,11 +591,15 @@ INPUT_LIBS = \
 	$(MMS_LIBS)
 
 INPUT_SRC = \
+	src/input_init.c \
+	src/input_registry.c \
 	src/input_stream.c \
+	src/input/rewind_input_plugin.c \
 	src/input/file_input_plugin.c
 
 if ENABLE_CURL
-INPUT_SRC += src/input/curl_input_plugin.c src/icy_metadata.c
+INPUT_SRC += src/input/curl_input_plugin.c \
+	src/icy_metadata.c
 endif
 
 if ENABLE_MMS
@@ -583,6 +611,7 @@ OUTPUT_CFLAGS = \
 	$(AO_CFLAGS) \
 	$(ALSA_CFLAGS) \
 	$(JACK_CFLAGS) \
+	$(OPENAL_CFLAGS) \
 	$(PULSE_CFLAGS) \
 	$(SHOUT_CFLAGS)
 
@@ -590,6 +619,7 @@ OUTPUT_LIBS = \
 	$(AO_LIBS) \
 	$(ALSA_LIBS) \
 	$(JACK_LIBS) \
+	$(OPENAL_LIBS) \
 	$(PULSE_LIBS) \
 	$(SHOUT_LIBS)
 
@@ -694,6 +724,14 @@ if ENABLE_LASTFM
 PLAYLIST_SRC += src/playlist/lastfm_playlist_plugin.c
 endif
 
+if HAVE_CUE
+PLAYLIST_SRC += src/playlist/cue_playlist_plugin.c
+endif
+
+if HAVE_FLAC
+PLAYLIST_SRC += src/playlist/flac_playlist_plugin.c
+endif
+
 
 #
 # Filter plugins
@@ -702,7 +740,11 @@ endif
 FILTER_SRC = \
 	src/filter/null_filter_plugin.c \
 	src/filter/chain_filter_plugin.c \
+	src/filter/autoconvert_filter_plugin.c \
 	src/filter/convert_filter_plugin.c \
+	src/filter/route_filter_plugin.c \
+	src/filter/normalize_filter_plugin.c \
+	src/filter/replay_gain_filter_plugin.c \
 	src/filter/volume_filter_plugin.c
 
 
@@ -732,6 +774,8 @@ sparse-check:
 
 if ENABLE_TEST
 
+TESTS =
+
 noinst_PROGRAMS = \
 	test/read_conf \
 	test/run_input \
@@ -742,6 +786,7 @@ noinst_PROGRAMS = \
 	test/run_output \
 	test/read_mixer \
 	test/run_convert \
+	test/run_normalize \
 	test/software_volume
 
 test_read_conf_CPPFLAGS = $(AM_CPPFLAGS) \
@@ -766,9 +811,13 @@ test_run_input_SOURCES = test/run_input.c \
 	$(INPUT_SRC)
 
 test_dump_playlist_CPPFLAGS = $(AM_CPPFLAGS) \
+	$(CUE_CFLAGS) \
+	$(patsubst -I%/FLAC,-I%,$(FLAC_CFLAGS)) \
 	$(ARCHIVE_CFLAGS) \
 	$(INPUT_CFLAGS)
 test_dump_playlist_LDADD = $(MPD_LIBS) \
+	$(CUE_LIBS) \
+	$(FLAC_LIBS) \
 	$(ARCHIVE_LIBS) \
 	$(INPUT_LIBS) \
 	$(GLIB_LIBS)
@@ -782,6 +831,16 @@ test_dump_playlist_SOURCES = test/dump_playlist.c \
 	$(INPUT_SRC) \
 	$(PLAYLIST_SRC)
 
+if HAVE_CUE
+test_dump_playlist_SOURCES += src/cue/cue_tag.c
+endif
+
+if HAVE_FLAC
+test_dump_playlist_SOURCES += \
+	src/replay_gain_info.c \
+	src/decoder/flac_metadata.c
+endif
+
 test_run_decoder_CPPFLAGS = $(AM_CPPFLAGS) \
 	$(TAG_CFLAGS) \
 	$(ARCHIVE_CFLAGS) \
@@ -794,11 +853,12 @@ test_run_decoder_LDADD = $(MPD_LIBS) \
 test_run_decoder_SOURCES = test/run_decoder.c \
 	src/conf.c src/tokenizer.c src/utils.c src/log.c \
 	src/tag.c src/tag_pool.c \
-	src/replay_gain.c \
+	src/replay_gain_info.c \
 	src/uri.c \
 	src/fd_util.c \
 	src/audio_check.c \
 	src/audio_format.c \
+	src/timer.c \
 	$(ARCHIVE_SRC) \
 	$(INPUT_SRC) \
 	$(TAG_SRC) \
@@ -816,10 +876,11 @@ test_read_tags_LDADD = $(MPD_LIBS) \
 test_read_tags_SOURCES = test/read_tags.c \
 	src/conf.c src/tokenizer.c src/utils.c src/log.c \
 	src/tag.c src/tag_pool.c \
-	src/replay_gain.c \
+	src/replay_gain_info.c \
 	src/uri.c \
 	src/fd_util.c \
 	src/audio_check.c \
+	src/timer.c \
 	$(ARCHIVE_SRC) \
 	$(INPUT_SRC) \
 	$(TAG_SRC) \
@@ -835,10 +896,14 @@ test_run_filter_SOURCES = test/run_filter.c \
 	src/conf.c src/tokenizer.c src/utils.c \
 	src/pcm_volume.c src/pcm_convert.c src/pcm_byteswap.c \
 	src/pcm_format.c src/pcm_channels.c src/pcm_dither.c \
+	src/pcm_pack.c \
 	src/pcm_resample.c src/pcm_resample_fallback.c \
 	src/audio_check.c \
 	src/audio_format.c \
 	src/audio_parser.c \
+	src/replay_gain_config.c \
+	src/replay_gain_info.c \
+	src/AudioCompress/compress.c \
 	$(FILTER_SRC)
 
 if HAVE_LIBSAMPLERATE
@@ -867,11 +932,21 @@ test_software_volume_SOURCES = test/software_volume.c \
 test_software_volume_LDADD = \
 	$(GLIB_LIBS)
 
+test_run_normalize_SOURCES = test/run_normalize.c \
+	src/audio_check.c \
+	src/audio_parser.c \
+	src/AudioCompress/compress.c
+test_run_normalize_LDADD = \
+	$(GLIB_LIBS)
+
 test_run_convert_SOURCES = test/run_convert.c \
+	src/fifo_buffer.c \
+	src/audio_format.c \
 	src/audio_check.c \
 	src/audio_parser.c \
 	src/pcm_channels.c \
 	src/pcm_format.c \
+	src/pcm_pack.c \
 	src/pcm_dither.c \
 	src/pcm_byteswap.c \
 	src/pcm_resample.c \
@@ -910,9 +985,16 @@ test_run_output_SOURCES = test/run_output.c \
 	src/mixer_type.c \
 	$(MIXER_SRC) \
 	src/filter_plugin.c src/filter/chain_filter_plugin.c \
+	src/filter_config.c \
+	src/filter/autoconvert_filter_plugin.c \
 	src/filter/convert_filter_plugin.c \
+	src/filter/replay_gain_filter_plugin.c \
+	src/filter/normalize_filter_plugin.c \
 	src/filter/volume_filter_plugin.c \
 	src/pcm_volume.c \
+	src/AudioCompress/compress.c \
+	src/replay_gain_info.c \
+	src/replay_gain_config.c \
 	src/fd_util.c \
 	$(OUTPUT_SRC)
 
@@ -929,6 +1011,18 @@ test_read_mixer_SOURCES = test/read_mixer.c \
 	src/fd_util.c \
 	$(MIXER_SRC)
 
+if ENABLE_BZIP2_TEST
+TESTS += test/test_archive_bzip2.sh
+endif
+
+if ENABLE_ZZIP_TEST
+TESTS += test/test_archive_zzip.sh
+endif
+
+if ENABLE_ISO9660_TEST
+TESTS += test/test_archive_iso9660.sh
+endif
+
 endif
 
 
@@ -939,7 +1033,7 @@ endif
 man_MANS = doc/mpd.1 doc/mpd.conf.5
 doc_DATA = AUTHORS COPYING NEWS README UPGRADING doc/mpdconf.example
 
-DOCBOOK_FILES = doc/protocol.xml doc/user.xml doc/developer.xml doc/sticker.xml
+DOCBOOK_FILES = doc/protocol.xml doc/user.xml doc/developer.xml
 
 if ENABLE_DOCUMENTATION
 protocoldir = $(docdir)/protocol
@@ -965,6 +1059,7 @@ DOCBOOK_HTML =
 endif
 
 doc/api/html/index.html: doc/doxygen.conf
+	@mkdir -p $(@D)
 	$(DOXYGEN) $<
 
 all-local: $(DOCBOOK_HTML) doc/api/html/index.html

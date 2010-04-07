@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -139,7 +139,8 @@ playlist_update_queued_song(struct playlist *playlist, const struct song *prev)
 		? queue_next_order(&playlist->queue, playlist->current)
 		: 0;
 
-	if (next_order == 0 && playlist->queue.random) {
+	if (next_order == 0 && playlist->queue.random &&
+	    !playlist->queue.single) {
 		/* shuffle the song order again, so we get a different
 		   order each time the playlist is played
 		   completely */

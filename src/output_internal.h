@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -76,6 +76,12 @@ struct audio_output {
 	struct mixer *mixer;
 
 	/**
+	 * Shall this output always play something (i.e. silence),
+	 * even when playback is stopped?
+	 */
+	bool always_on;
+
+	/**
 	 * Has the user enabled this device?
 	 */
 	bool enabled;
@@ -133,6 +139,18 @@ struct audio_output {
 	 * instance of chain_filter_plugin.
 	 */
 	struct filter *filter;
+
+	/**
+	 * The replay_gain_filter_plugin instance of this audio
+	 * output.
+	 */
+	struct filter *replay_gain_filter;
+
+	/**
+	 * The serial number of the last replay gain info.  0 means no
+	 * replay gain info was available.
+	 */
+	unsigned replay_gain_serial;
 
 	/**
 	 * The convert_filter_plugin instance of this audio output.

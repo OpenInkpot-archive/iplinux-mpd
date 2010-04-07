@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -19,7 +19,7 @@
 
 #include "config.h"
 #include "flac_metadata.h"
-#include "replay_gain.h"
+#include "replay_gain_info.h"
 #include "tag.h"
 
 #include <glib.h>
@@ -56,28 +56,71 @@ flac_find_float_comment(const FLAC__StreamMetadata *block,
 	return true;
 }
 
-struct replay_gain_info *
-flac_parse_replay_gain(const FLAC__StreamMetadata *block)
+bool
+flac_parse_replay_gain(struct replay_gain_info *rgi,
+		       const FLAC__StreamMetadata *block)
 {
-	struct replay_gain_info *rgi;
 	bool found = false;
 
-	rgi = replay_gain_info_new();
+	replay_gain_info_init(rgi);
 
-	found = flac_find_float_comment(block, "replaygain_album_gain",
-					&rgi->tuples[REPLAY_GAIN_ALBUM].gain) ||
-		flac_find_float_comment(block, "replaygain_album_peak",
-					&rgi->tuples[REPLAY_GAIN_ALBUM].peak) ||
-		flac_find_float_comment(block, "replaygain_track_gain",
-					&rgi->tuples[REPLAY_GAIN_TRACK].gain) ||
-		flac_find_float_comment(block, "replaygain_track_peak",
-					&rgi->tuples[REPLAY_GAIN_TRACK].peak);
-	if (!found) {
-		replay_gain_info_free(rgi);
-		rgi = NULL;
-	}
+	if (flac_find_float_comment(block, "replaygain_album_gain",
+				    &rgi->tuples[REPLAY_GAIN_ALBUM].gain))
+		found = true;
+	if (flac_find_float_comment(block, "replaygain_album_peak",
+				    &rgi->tuples[REPLAY_GAIN_ALBUM].peak))
+		found = true;
+	if (flac_find_float_comment(block, "replaygain_track_gain",
+				    &rgi->tuples[REPLAY_GAIN_TRACK].gain))
+		found = true;
+	if (flac_find_float_comment(block, "replaygain_track_peak",
+				    &rgi->tuples[REPLAY_GAIN_TRACK].peak))
+		found = true;
 
-	return rgi;
+	return found;
+}
+
+static bool
+flac_find_string_comment(const FLAC__StreamMetadata *block,
+			 const char *cmnt, char **str)
+{
+	int offset;
+	size_t pos;
+	int len;
+	unsigned char tmp, *p;
+
+	*str = NULL;
+	offset = FLAC__metadata_object_vorbiscomment_find_entry_from(block, 0,
+								     cmnt);
+	if (offset < 0)
+		return false;
+
+	pos = strlen(cmnt) + 1; /* 1 is for '=' */
+	len = block->data.vorbis_comment.comments[offset].length - pos;
+	if (len <= 0)
+		return false;
+
+	p = &block->data.vorbis_comment.comments[offset].entry[pos];
+	tmp = p[len];
+	p[len] = '\0';
+	*str = strdup((char *)p);
+	p[len] = tmp;
+
+	return true;
+}
+
+bool
+flac_parse_mixramp(char **mixramp_start, char **mixramp_end,
+		   const FLAC__StreamMetadata *block)
+{
+	bool found = false;
+
+	if (flac_find_string_comment(block, "mixramp_start", mixramp_start))
+		found = true;
+	if (flac_find_string_comment(block, "mixramp_end", mixramp_end))
+		found = true;
+
+	return found;
 }
 
 /**
@@ -190,4 +233,57 @@ flac_tag_apply_metadata(struct tag *tag, const char *track,
 	default:
 		break;
 	}
+}
+
+struct tag *
+flac_tag_load(const char *file, const char *char_tnum)
+{
+	struct tag *tag;
+	FLAC__Metadata_SimpleIterator *it;
+	FLAC__StreamMetadata *block = NULL;
+
+	it = FLAC__metadata_simple_iterator_new();
+	if (!FLAC__metadata_simple_iterator_init(it, file, 1, 0)) {
+		const char *err;
+		FLAC_API FLAC__Metadata_SimpleIteratorStatus s;
+
+		s = FLAC__metadata_simple_iterator_status(it);
+
+		switch (s) { /* slightly more human-friendly messages: */
+		case FLAC__METADATA_SIMPLE_ITERATOR_STATUS_ILLEGAL_INPUT:
+			err = "illegal input";
+			break;
+		case FLAC__METADATA_SIMPLE_ITERATOR_STATUS_ERROR_OPENING_FILE:
+			err = "error opening file";
+			break;
+		case FLAC__METADATA_SIMPLE_ITERATOR_STATUS_NOT_A_FLAC_FILE:
+			err = "not a FLAC file";
+			break;
+		default:
+			err = FLAC__Metadata_SimpleIteratorStatusString[s];
+		}
+		g_debug("Reading '%s' metadata gave the following error: %s\n",
+			file, err);
+		FLAC__metadata_simple_iterator_delete(it);
+		return NULL;
+	}
+
+	tag = tag_new();
+	do {
+		block = FLAC__metadata_simple_iterator_get_block(it);
+		if (!block)
+			break;
+
+		flac_tag_apply_metadata(tag, char_tnum, block);
+		FLAC__metadata_object_delete(block);
+	} while (FLAC__metadata_simple_iterator_next(it));
+
+	FLAC__metadata_simple_iterator_delete(it);
+
+	if (!tag_is_defined(tag)) {
+		tag_free(tag);
+		tag = NULL;
+	}
+
+	return tag;
 }

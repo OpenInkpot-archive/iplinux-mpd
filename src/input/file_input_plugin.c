@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -32,75 +32,79 @@
 #undef G_LOG_DOMAIN
 #define G_LOG_DOMAIN "input_file"
 
-static bool
-input_file_open(struct input_stream *is, const char *filename)
+struct file_input_stream {
+	struct input_stream base;
+
+	int fd;
+};
+
+static inline GQuark
+file_quark(void)
+{
+	return g_quark_from_static_string("file");
+}
+
+static struct input_stream *
+input_file_open(const char *filename, GError **error_r)
 {
 	int fd, ret;
 	struct stat st;
-
-	char* pathname = g_strdup(filename);
+	struct file_input_stream *fis;
 
 	if (!g_path_is_absolute(filename))
-	{
-		g_free(pathname);
 		return false;
-	}
 
-	if (stat(filename, &st) < 0) {
-		char* slash = strrchr(pathname, '/');
-		*slash = '\0';
-	}
-
-	fd = open_cloexec(pathname, O_RDONLY, 0);
+	fd = open_cloexec(filename, O_RDONLY, 0);
 	if (fd < 0) {
-		is->error = errno;
-		g_debug("Failed to open \"%s\": %s",
-			pathname, g_strerror(errno));
-		g_free(pathname);
+		if (errno != ENOENT && errno != ENOTDIR)
+			g_set_error(error_r, file_quark(), errno,
+				    "Failed to open \"%s\": %s",
+				    filename, g_strerror(errno));
 		return false;
 	}
-
-	is->seekable = true;
 
 	ret = fstat(fd, &st);
 	if (ret < 0) {
-		is->error = errno;
+		g_set_error(error_r, file_quark(), errno,
+			    "Failed to stat \"%s\": %s",
+			    filename, g_strerror(errno));
 		close(fd);
-		g_free(pathname);
 		return false;
 	}
 
 	if (!S_ISREG(st.st_mode)) {
-		g_debug("Not a regular file: %s", pathname);
-		is->error = EINVAL;
+		g_set_error(error_r, file_quark(), 0,
+			    "Not a regular file: %s", filename);
 		close(fd);
-		g_free(pathname);
 		return false;
 	}
 
-	is->size = st.st_size;
-
 #ifdef POSIX_FADV_SEQUENTIAL
-	posix_fadvise(fd, (off_t)0, is->size, POSIX_FADV_SEQUENTIAL);
+	posix_fadvise(fd, (off_t)0, st.st_size, POSIX_FADV_SEQUENTIAL);
 #endif
 
-	is->plugin = &input_plugin_file;
-	is->data = GINT_TO_POINTER(fd);
-	is->ready = true;
+	fis = g_new(struct file_input_stream, 1);
+	input_stream_init(&fis->base, &input_plugin_file, filename);
 
-	g_free(pathname);
+	fis->base.size = st.st_size;
+	fis->base.seekable = true;
+	fis->base.ready = true;
 
-	return true;
+	fis->fd = fd;
+
+	return &fis->base;
 }
 
 static bool
-input_file_seek(struct input_stream *is, goffset offset, int whence)
+input_file_seek(struct input_stream *is, goffset offset, int whence,
+		GError **error_r)
 {
-	int fd = GPOINTER_TO_INT(is->data);
+	struct file_input_stream *fis = (struct file_input_stream *)is;
 
-	offset = (goffset)lseek(fd, (off_t)offset, whence);
+	offset = (goffset)lseek(fis->fd, (off_t)offset, whence);
 	if (offset < 0) {
-		is->error = errno;
+		g_set_error(error_r, file_quark(), errno,
+			    "Failed to seek: %s", g_strerror(errno));
 		return false;
 	}
 
@@ -109,16 +113,16 @@ input_file_seek(struct input_stream *is, goffset offset, int whence)
 }
 
 static size_t
-input_file_read(struct input_stream *is, void *ptr, size_t size)
+input_file_read(struct input_stream *is, void *ptr, size_t size,
+		GError **error_r)
 {
-	int fd = GPOINTER_TO_INT(is->data);
+	struct file_input_stream *fis = (struct file_input_stream *)is;
 	ssize_t nbytes;
 
-	nbytes = read(fd, ptr, size);
+	nbytes = read(fis->fd, ptr, size);
 	if (nbytes < 0) {
-		is->error = errno;
-		g_debug("input_file_read: error reading: %s\n",
-			strerror(is->error));
+		g_set_error(error_r, file_quark(), errno,
+			    "Failed to read: %s", g_strerror(errno));
 		return 0;
 	}
 
@@ -129,9 +133,11 @@ input_file_read(struct input_stream *is, void *ptr, size_t size)
 static void
 input_file_close(struct input_stream *is)
 {
-	int fd = GPOINTER_TO_INT(is->data);
+	struct file_input_stream *fis = (struct file_input_stream *)is;
 
-	close(fd);
+	close(fis->fd);
+	input_stream_deinit(&fis->base);
+	g_free(fis);
 }
 
 static bool

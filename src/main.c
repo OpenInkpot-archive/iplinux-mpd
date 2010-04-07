@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -42,14 +42,13 @@
 #include "volume.h"
 #include "log.h"
 #include "permission.h"
-#include "replay_gain.h"
+#include "replay_gain_config.h"
 #include "decoder_list.h"
-#include "input_stream.h"
+#include "input_init.h"
 #include "playlist_list.h"
 #include "state_file.h"
 #include "tag.h"
 #include "dbUtils.h"
-#include "normalize.h"
 #include "zeroconf.h"
 #include "event_pipe.h"
 #include "dirvec.h"
@@ -348,8 +347,13 @@ int main(int argc, char *argv[])
 	audio_output_all_init();
 	client_manager_init();
 	replay_gain_global_init();
-	initNormalization();
-	input_stream_global_init();
+
+	if (!input_stream_global_init(&error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
+		return EXIT_FAILURE;
+	}
+
 	playlist_list_global_init();
 
 	daemonize(options.daemon);
@@ -420,7 +424,6 @@ int main(int argc, char *argv[])
 
 	playlist_list_global_finish();
 	input_stream_global_finish();
-	finishNormalization();
 	audio_output_all_finish();
 	volume_finish();
 	mapper_finish();

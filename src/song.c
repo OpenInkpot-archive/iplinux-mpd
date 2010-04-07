@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -42,6 +42,7 @@ song_alloc(const char *uri, struct directory *parent)
 	memcpy(song->uri, uri, uri_length + 1);
 	song->parent = parent;
 	song->mtime = 0;
+	song->start_ms = song->end_ms = 0;
 
 	return song;
 }
@@ -79,4 +80,16 @@ song_get_uri(const struct song *song)
 	else
 		return g_strconcat(directory_get_path(song->parent),
 				   "/", song->uri, NULL);
+}
+
+double
+song_get_duration(const struct song *song)
+{
+	if (song->end_ms > 0)
+		return (song->end_ms - song->start_ms) / 1000.0;
+
+	if (song->tag == NULL)
+		return 0;
+
+	return song->tag->time - song->start_ms / 1000.0;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -40,7 +40,7 @@ sndfile_vio_seek(sf_count_t offset, int whence, void *user_data)
 	struct input_stream *is = user_data;
 	bool success;
 
-	success = input_stream_seek(is, offset, whence);
+	success = input_stream_seek(is, offset, whence, NULL);
 	if (!success)
 		return -1;
 
@@ -51,11 +51,15 @@ static sf_count_t
 sndfile_vio_read(void *ptr, sf_count_t count, void *user_data)
 {
 	struct input_stream *is = user_data;
+	GError *error = NULL;
 	size_t nbytes;
 
-	nbytes = input_stream_read(is, ptr, count);
-	if (nbytes == 0 && is->error != 0)
+	nbytes = input_stream_read(is, ptr, count, &error);
+	if (nbytes == 0 && error != NULL) {
+		g_warning("%s", error->message);
+		g_error_free(error);
 		return -1;
+	}
 
 	return nbytes;
 }
@@ -115,7 +119,7 @@ sndfile_stream_decode(struct decoder *decoder, struct input_stream *is)
 	SF_INFO info;
 	struct audio_format audio_format;
 	size_t frame_size;
-	sf_count_t read_frames, num_frames, position = 0;
+	sf_count_t read_frames, num_frames;
 	int buffer[4096];
 	enum decoder_command cmd;
 
@@ -130,7 +134,8 @@ sndfile_stream_decode(struct decoder *decoder, struct input_stream *is)
 	/* for now, always read 32 bit samples.  Later, we could lower
 	   MPD's CPU usage by reading 16 bit samples with
 	   sf_readf_short() on low-quality source files. */
-	if (!audio_format_init_checked(&audio_format, info.samplerate, 32,
+	if (!audio_format_init_checked(&audio_format, info.samplerate,
+				       SAMPLE_FORMAT_S32,
 				       info.channels, &error)) {
 		g_warning("%s", error->message);
 		g_error_free(error);
@@ -150,8 +155,7 @@ sndfile_stream_decode(struct decoder *decoder, struct input_stream *is)
 
 		cmd = decoder_data(decoder, is,
 				   buffer, num_frames * frame_size,
-				   frame_to_time(position, &audio_format),
-				   0, NULL);
+				   0);
 		if (cmd == DECODE_COMMAND_SEEK) {
 			sf_count_t c =
 				time_to_frame(decoder_seek_where(decoder),

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -150,22 +150,22 @@ pcm_volume(void *buffer, int length,
 		return true;
 	}
 
-	switch (format->bits) {
-	case 8:
+	switch (format->format) {
+	case SAMPLE_FORMAT_S8:
 		pcm_volume_change_8((int8_t *)buffer, length, volume);
 		return true;
 
-	case 16:
+	case SAMPLE_FORMAT_S16:
 		pcm_volume_change_16((int16_t *)buffer, length / 2,
 				     volume);
 		return true;
 
-	case 24:
+	case SAMPLE_FORMAT_S24_P32:
 		pcm_volume_change_24((int32_t*)buffer, length / 4,
 				     volume);
 		return true;
 
-	case 32:
+	case SAMPLE_FORMAT_S32:
 		pcm_volume_change_32((int32_t*)buffer, length / 4,
 				     volume);
 		return true;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -244,6 +244,7 @@ pulse_output_setup_context(struct pulse_output *po, GError **error_r)
 
 	if (!pulse_output_connect(po, error_r)) {
 		pa_context_unref(po->context);
+		po->context = NULL;
 		return false;
 	}
 
@@ -315,7 +316,7 @@ pulse_output_enable(void *data, GError **error_r)
 	if (pa_threaded_mainloop_start(po->mainloop) < 0) {
 		pa_threaded_mainloop_unlock(po->mainloop);
 		pa_threaded_mainloop_free(po->mainloop);
-		g_free(po);
+		po->mainloop = NULL;
 
 		g_set_error(error_r, pulse_output_quark(), 0,
 			    "pa_threaded_mainloop_start() has failed");
@@ -332,7 +333,7 @@ pulse_output_enable(void *data, GError **error_r)
 		pa_threaded_mainloop_unlock(po->mainloop);
 		pa_threaded_mainloop_stop(po->mainloop);
 		pa_threaded_mainloop_free(po->mainloop);
-		g_free(po);
+		po->mainloop = NULL;
 		return false;
 	}
 
@@ -467,7 +468,7 @@ pulse_output_open(void *data, struct audio_format *audio_format,
 
 	/* MPD doesn't support the other pulseaudio sample formats, so
 	   we just force MPD to send us everything as 16 bit */
-	audio_format->bits = 16;
+	audio_format->format = SAMPLE_FORMAT_S16;
 
 	ss.format = PA_SAMPLE_S16NE;
 	ss.rate = audio_format->sample_rate;

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -44,17 +44,27 @@ struct flac_data {
 	unsigned frame_size;
 
 	/**
-	 * Is the #stream_info member valid?
+	 * Has decoder_initialized() been called yet?
 	 */
-	bool have_stream_info;
+	bool initialized;
 
 	/**
-	 * A copy of the stream info object passed to the metadata
-	 * callback.  Once we drop support for libFLAC 1.1.2, we can
-	 * remove this attribute, and use
-	 * FLAC__stream_decoder_get_total_samples() etc.
+	 * Does the FLAC file contain an unsupported audio format?
 	 */
-	FLAC__StreamMetadata_StreamInfo stream_info;
+	bool unsupported;
+
+	/**
+	 * The validated audio format of the FLAC file.  This
+	 * attribute is defined if "initialized" is true.
+	 */
+	struct audio_format audio_format;
+
+	/**
+	 * The total number of frames in this song.  The decoder
+	 * plugin may initialize this attribute to override the value
+	 * provided by libFLAC (e.g. for sub songs from a CUE sheet).
+	 */
+	FLAC__uint64 total_frames;
 
 	/**
 	 * The number of the first frame in this song.  This is only
@@ -70,7 +80,6 @@ struct flac_data {
 	FLAC__uint64 position;
 	struct decoder *decoder;
 	struct input_stream *input_stream;
-	struct replay_gain_info *replay_gain_info;
 	struct tag *tag;
 };
 
@@ -81,17 +90,6 @@ flac_data_init(struct flac_data *data, struct decoder * decoder,
 
 void
 flac_data_deinit(struct flac_data *data);
-
-/**
- * Obtains the audio format from the stream_info attribute, and copies
- * it to the specified #audio_format object.  This also updates the
- * frame_size attribute.
- *
- * @return true on success, false the audio format is not supported
- */
-bool
-flac_data_get_audio_format(struct flac_data *data,
-			   struct audio_format *audio_format);
 
 void flac_metadata_common_cb(const FLAC__StreamMetadata * block,
 			     struct flac_data *data);
@@ -104,16 +102,5 @@ FLAC__StreamDecoderWriteStatus
 flac_common_write(struct flac_data *data, const FLAC__Frame * frame,
 		  const FLAC__int32 *const buf[],
 		  FLAC__uint64 nbytes);
-
-#if defined(FLAC_API_VERSION_CURRENT) && FLAC_API_VERSION_CURRENT > 7
-
-char*
-flac_cue_track(		const char* pathname,
-			const unsigned int tnum);
-
-unsigned int
-flac_vtrack_tnum(	const char*);
-
-#endif /* FLAC_API_VERSION_CURRENT >= 7 */
 
 #endif /* _FLAC_COMMON_H */

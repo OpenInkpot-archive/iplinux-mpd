@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -35,7 +35,7 @@ audio_check_sample_rate(unsigned long sample_rate, GError **error_r)
 }
 
 bool
-audio_check_sample_format(unsigned sample_format, GError **error_r)
+audio_check_sample_format(enum sample_format sample_format, GError **error_r)
 {
 	if (!audio_valid_sample_format(sample_format)) {
 		g_set_error(error_r, audio_format_quark(), 0,
@@ -60,7 +60,7 @@ audio_check_channel_count(unsigned channels, GError **error_r)
 
 bool
 audio_format_init_checked(struct audio_format *af, unsigned long sample_rate,
-			  unsigned sample_format, unsigned channels,
+			  enum sample_format sample_format, unsigned channels,
 			  GError **error_r)
 {
 	if (audio_check_sample_rate(sample_rate, error_r) &&

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -26,12 +26,18 @@
 #include "filter_registry.h"
 #include "pcm_convert.h"
 #include "event_pipe.h"
+#include "idle.h"
 
 #include <glib.h>
 
 #include <assert.h>
 #include <string.h>
 #include <unistd.h>
+
+void
+idle_add(G_GNUC_UNUSED unsigned flags)
+{
+}
 
 void
 event_pipe_emit(G_GNUC_UNUSED enum pipe_event event)
@@ -119,7 +125,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	audio_format_init(&audio_format, 44100, 16, 2);
+	audio_format_init(&audio_format, 44100, SAMPLE_FORMAT_S16, 2);
 
 	g_thread_init(NULL);
 

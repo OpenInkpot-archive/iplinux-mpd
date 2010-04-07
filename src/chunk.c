@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -29,6 +29,7 @@ music_chunk_init(struct music_chunk *chunk)
 {
 	chunk->length = 0;
 	chunk->tag = NULL;
+	chunk->replay_gain_serial = 0;
 }
 
 void

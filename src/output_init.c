@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -29,7 +29,10 @@
 #include "mixer/software_mixer_plugin.h"
 #include "filter_plugin.h"
 #include "filter_registry.h"
+#include "filter_config.h"
 #include "filter/chain_filter_plugin.h"
+#include "filter/autoconvert_filter_plugin.h"
+#include "filter/replay_gain_filter_plugin.h"
 
 #include <glib.h>
 
@@ -41,6 +44,7 @@
 #define AUDIO_OUTPUT_TYPE	"type"
 #define AUDIO_OUTPUT_NAME	"name"
 #define AUDIO_OUTPUT_FORMAT	"format"
+#define AUDIO_FILTERS		"filters"
 
 static const struct audio_output_plugin *
 audio_output_detect(GError **error)
@@ -180,6 +184,7 @@ audio_output_init(struct audio_output *ao, const struct config_param *param,
 	}
 
 	ao->plugin = plugin;
+	ao->always_on = config_get_block_bool(param, "always_on", false);
 	ao->enabled = config_get_block_bool(param, "enabled", true);
 	ao->really_enabled = false;
 	ao->open = false;
@@ -190,6 +195,46 @@ audio_output_init(struct audio_output *ao, const struct config_param *param,
 
 	ao->filter = filter_chain_new();
 	assert(ao->filter != NULL);
+
+	/* create the replay_gain filter */
+
+	const char *replay_gain_handler =
+		config_get_block_string(param, "replay_gain_handler",
+					"software");
+
+	if (strcmp(replay_gain_handler, "none") != 0) {
+		ao->replay_gain_filter = filter_new(&replay_gain_filter_plugin,
+						    param, NULL);
+		assert(ao->replay_gain_filter != NULL);
+
+		filter_chain_append(ao->filter, ao->replay_gain_filter);
+		ao->replay_gain_serial = 0;
+	} else
+		ao->replay_gain_filter = NULL;
+
+	/* create the normalization filter (if configured) */
+
+	if (config_get_bool(CONF_VOLUME_NORMALIZATION, false)) {
+		struct filter *normalize_filter =
+			filter_new(&normalize_filter_plugin, NULL, NULL);
+		assert(normalize_filter != NULL);
+
+		filter_chain_append(ao->filter,
+				    autoconvert_filter_new(normalize_filter));
+	}
+
+	filter_chain_parse(ao->filter,
+	                   config_get_block_string(param, AUDIO_FILTERS, ""),
+	                   &error
+	);
+
+	// It's not really fatal - Part of the filter chain has been set up already
+	// and even an empty one will work (if only with unexpected behaviour)
+	if (error != NULL) {
+		g_warning("Failed to initialize filter chain for '%s': %s",
+			  ao->name, error->message);
+		g_error_free(error);
+	}
 
 	ao->thread = NULL;
 	ao->command = AO_COMMAND_NONE;
@@ -209,6 +254,21 @@ audio_output_init(struct audio_output *ao, const struct config_param *param,
 		g_warning("Failed to initialize hardware mixer for '%s': %s",
 			  ao->name, error->message);
 		g_error_free(error);
+	}
+
+	/* use the hardware mixer for replay gain? */
+
+	if (strcmp(replay_gain_handler, "mixer") == 0) {
+		if (ao->mixer != NULL)
+			replay_gain_filter_set_mixer(ao->replay_gain_filter,
+						     ao->mixer, 100);
+		else
+			g_warning("No such mixer for output '%s'", ao->name);
+	} else if (strcmp(replay_gain_handler, "software") != 0 &&
+		   ao->replay_gain_filter != NULL) {
+		g_set_error(error_r, audio_output_quark(), 0,
+			    "Invalid \"replay_gain_handler\" value");
+		return false;
 	}
 
 	/* the "convert" filter must be the last one in the chain */

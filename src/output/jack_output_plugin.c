@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -88,17 +88,43 @@ jack_output_quark(void)
 	return g_quark_from_static_string("jack_output");
 }
 
+/**
+ * Determine the number of frames guaranteed to be available on all
+ * channels.
+ */
+static jack_nframes_t
+mpd_jack_available(const struct jack_data *jd)
+{
+	size_t min = jack_ringbuffer_read_space(jd->ringbuffer[0]);
+
+	for (unsigned i = 1; i < jd->audio_format.channels; ++i) {
+		size_t current = jack_ringbuffer_read_space(jd->ringbuffer[i]);
+		if (current < min)
+			min = current;
+	}
+
+	assert(min % sample_size == 0);
+
+	return min / sample_size;
+}
+
 static int
 mpd_jack_process(jack_nframes_t nframes, void *arg)
 {
 	struct jack_data *jd = (struct jack_data *) arg;
 	jack_default_audio_sample_t *out;
-	size_t available;
 
 	if (nframes <= 0)
 		return 0;
 
 	if (jd->pause) {
+		/* empty the ring buffers */
+
+		const jack_nframes_t available = mpd_jack_available(jd);
+		for (unsigned i = 0; i < jd->audio_format.channels; ++i)
+			jack_ringbuffer_read_advance(jd->ringbuffer[i],
+						     available * sample_size);
+
 		/* generate silence while MPD is paused */
 
 		for (unsigned i = 0; i < jd->audio_format.channels; ++i) {
@@ -111,20 +137,18 @@ mpd_jack_process(jack_nframes_t nframes, void *arg)
 		return 0;
 	}
 
-	for (unsigned i = 0; i < jd->audio_format.channels; ++i) {
-		available = jack_ringbuffer_read_space(jd->ringbuffer[i]);
-		assert(available % sample_size == 0);
-		available /= sample_size;
-		if (available > nframes)
-			available = nframes;
+	jack_nframes_t available = mpd_jack_available(jd);
+	if (available > nframes)
+		available = nframes;
 
+	for (unsigned i = 0; i < jd->audio_format.channels; ++i) {
 		out = jack_port_get_buffer(jd->ports[i], nframes);
 		jack_ringbuffer_read(jd->ringbuffer[i],
 				     (char *)out, available * sample_size);
 
-		while (available < nframes)
+		for (jack_nframes_t f = available; f < nframes; ++f)
 			/* ringbuffer underrun, fill with silence */
-			out[available++] = 0.0;
+			out[f] = 0.0;
 	}
 
 	/* generate silence for the unused source ports */
@@ -157,8 +181,9 @@ set_audioformat(struct jack_data *jd, struct audio_format *audio_format)
 	else if (audio_format->channels > jd->num_source_ports)
 		audio_format->channels = 2;
 
-	if (audio_format->bits != 16 && audio_format->bits != 24)
-		audio_format->bits = 24;
+	if (audio_format->format != SAMPLE_FORMAT_S16 &&
+	    audio_format->format != SAMPLE_FORMAT_S24_P32)
+		audio_format->format = SAMPLE_FORMAT_S24_P32;
 }
 
 static void
@@ -606,13 +631,13 @@ static void
 mpd_jack_write_samples(struct jack_data *jd, const void *src,
 		       unsigned num_samples)
 {
-	switch (jd->audio_format.bits) {
-	case 16:
+	switch (jd->audio_format.format) {
+	case SAMPLE_FORMAT_S16:
 		mpd_jack_write_samples_16(jd, (const int16_t*)src,
 					  num_samples);
 		break;
 
-	case 24:
+	case SAMPLE_FORMAT_S24_P32:
 		mpd_jack_write_samples_24(jd, (const int32_t*)src,
 					  num_samples);
 		break;

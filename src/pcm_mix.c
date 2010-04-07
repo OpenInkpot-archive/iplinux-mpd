@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -103,31 +103,32 @@ pcm_add(void *buffer1, const void *buffer2, size_t size,
 	int vol1, int vol2,
 	const struct audio_format *format)
 {
-	switch (format->bits) {
-	case 8:
+	switch (format->format) {
+	case SAMPLE_FORMAT_S8:
 		pcm_add_8((int8_t *)buffer1, (const int8_t *)buffer2,
 			  size, vol1, vol2);
 		break;
 
-	case 16:
+	case SAMPLE_FORMAT_S16:
 		pcm_add_16((int16_t *)buffer1, (const int16_t *)buffer2,
 			   size / 2, vol1, vol2);
 		break;
 
-	case 24:
+	case SAMPLE_FORMAT_S24_P32:
 		pcm_add_24((int32_t*)buffer1,
 			   (const int32_t*)buffer2,
 			   size / 4, vol1, vol2);
 		break;
 
-	case 32:
+	case SAMPLE_FORMAT_S32:
 		pcm_add_32((int32_t*)buffer1,
 			   (const int32_t*)buffer2,
 			   size / 4, vol1, vol2);
 		break;
 
 	default:
-		g_error("%u bits not supported by pcm_add!\n", format->bits);
+		g_error("format %s not supported by pcm_add",
+			sample_format_to_string(format->format));
 	}
 }
 
@@ -136,7 +137,16 @@ pcm_mix(void *buffer1, const void *buffer2, size_t size,
 	const struct audio_format *format, float portion1)
 {
 	int vol1;
-	float s = sin(M_PI_2 * portion1);
+	float s;
+
+	/* portion1 is between 0.0 and 1.0 for crossfading, MixRamp uses NaN
+	 * to signal mixing rather than fading */
+	if (isnan(portion1)) {
+		pcm_add(buffer1, buffer2, size, PCM_VOLUME_1, PCM_VOLUME_1, format);
+		return;
+	}
+
+	s = sin(M_PI_2 * portion1);
 	s *= s;
 
 	vol1 = s * PCM_VOLUME_1 + 0.5;

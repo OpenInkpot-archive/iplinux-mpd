@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -34,6 +34,18 @@ bool uri_has_scheme(const char *uri);
 G_GNUC_PURE
 const char *
 uri_get_suffix(const char *uri);
+
+/**
+ * Returns true if this is a safe "local" URI:
+ *
+ * - non-empty
+ * - does not begin or end with a slash
+ * - no double slashes
+ * - no path component begins with a dot
+ */
+G_GNUC_PURE
+bool
+uri_safe_local(const char *uri);
 
 /**
  * Removes HTTP username and password from the URI.  This may be

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -99,6 +99,8 @@ map_spl_path(void);
  * Maps a playlist name (without the ".m3u" suffix) to a file system
  * path.  The return value is allocated on the heap and must be freed
  * with g_free().
+ *
+ * @return the path in file system encoding, or NULL if mapping failed
  */
 char *
 map_spl_utf8_to_fs(const char *name);

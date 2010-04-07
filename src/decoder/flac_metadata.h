@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -20,9 +20,11 @@
 #ifndef MPD_FLAC_METADATA_H
 #define MPD_FLAC_METADATA_H
 
+#include <stdbool.h>
 #include <FLAC/metadata.h>
 
 struct tag;
+struct replay_gain_info;
 
 static inline unsigned
 flac_duration(const FLAC__StreamMetadata_StreamInfo *stream_info)
@@ -31,8 +33,13 @@ flac_duration(const FLAC__StreamMetadata_StreamInfo *stream_info)
 		stream_info->sample_rate;
 }
 
-struct replay_gain_info *
-flac_parse_replay_gain(const FLAC__StreamMetadata *block);
+bool
+flac_parse_replay_gain(struct replay_gain_info *rgi,
+		       const FLAC__StreamMetadata *block);
+
+bool
+flac_parse_mixramp(char **mixramp_start, char **mixramp_end,
+		   const FLAC__StreamMetadata *block);
 
 void
 flac_vorbis_comments_to_tag(struct tag *tag, const char *char_tnum,
@@ -41,5 +48,8 @@ flac_vorbis_comments_to_tag(struct tag *tag, const char *char_tnum,
 void
 flac_tag_apply_metadata(struct tag *tag, const char *track,
 			const FLAC__StreamMetadata *block);
+
+struct tag *
+flac_tag_load(const char *file, const char *char_tnum);
 
 #endif

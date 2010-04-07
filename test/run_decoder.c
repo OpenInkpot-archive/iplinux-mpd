@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -20,6 +20,7 @@
 #include "config.h"
 #include "decoder_list.h"
 #include "decoder_api.h"
+#include "input_init.h"
 #include "input_stream.h"
 #include "audio_format.h"
 #include "pcm_volume.h"
@@ -29,6 +30,16 @@
 
 #include <assert.h>
 #include <unistd.h>
+
+static void
+my_log_func(const gchar *log_domain, G_GNUC_UNUSED GLogLevelFlags log_level,
+	    const gchar *message, G_GNUC_UNUSED gpointer user_data)
+{
+	if (log_domain != NULL)
+		g_printerr("%s: %s\n", log_domain, message);
+	else
+		g_printerr("%s\n", message);
+}
 
 /**
  * No-op dummy.
@@ -74,11 +85,6 @@ decoder_initialized(struct decoder *decoder,
 	decoder->initialized = true;
 }
 
-char *decoder_get_uri(struct decoder *decoder)
-{
-	return g_strdup(decoder->uri);
-}
-
 enum decoder_command
 decoder_get_command(G_GNUC_UNUSED struct decoder *decoder)
 {
@@ -103,15 +109,20 @@ decoder_read(G_GNUC_UNUSED struct decoder *decoder,
 	     struct input_stream *is,
 	     void *buffer, size_t length)
 {
-	return input_stream_read(is, buffer, length);
+	return input_stream_read(is, buffer, length, NULL);
+}
+
+void
+decoder_timestamp(G_GNUC_UNUSED struct decoder *decoder,
+		  G_GNUC_UNUSED double t)
+{
 }
 
 enum decoder_command
 decoder_data(G_GNUC_UNUSED struct decoder *decoder,
 	     G_GNUC_UNUSED struct input_stream *is,
 	     const void *data, size_t datalen,
-	     G_GNUC_UNUSED float data_time, G_GNUC_UNUSED uint16_t bit_rate,
-	     G_GNUC_UNUSED struct replay_gain_info *replay_gain_info)
+	     G_GNUC_UNUSED uint16_t kbit_rate)
 {
 	write(1, data, datalen);
 	return DECODE_COMMAND_NONE;
@@ -125,9 +136,23 @@ decoder_tag(G_GNUC_UNUSED struct decoder *decoder,
 	return DECODE_COMMAND_NONE;
 }
 
+void
+decoder_replay_gain(G_GNUC_UNUSED struct decoder *decoder,
+		    G_GNUC_UNUSED const struct replay_gain_info *replay_gain_info)
+{
+}
+
+void
+decoder_mixramp(G_GNUC_UNUSED struct decoder *decoder,
+		char *mixramp_start, char *mixramp_end)
+{
+	g_free(mixramp_start);
+	g_free(mixramp_end);
+}
+
 int main(int argc, char **argv)
 {
-	bool ret;
+	GError *error = NULL;
 	const char *decoder_name;
 	struct decoder decoder;
 
@@ -139,7 +164,14 @@ int main(int argc, char **argv)
 	decoder_name = argv[1];
 	decoder.uri = argv[2];
 
-	input_stream_global_init();
+	g_log_set_default_handler(my_log_func, NULL);
+
+	if (!input_stream_global_init(&error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
+		return 2;
+	}
+
 	decoder_plugin_init_all();
 
 	decoder.plugin = decoder_plugin_from_name(decoder_name);
@@ -154,15 +186,21 @@ int main(int argc, char **argv)
 		decoder_plugin_file_decode(decoder.plugin, &decoder,
 					   decoder.uri);
 	} else if (decoder.plugin->stream_decode != NULL) {
-		struct input_stream is;
+		struct input_stream *is =
+			input_stream_open(decoder.uri, &error);
+		if (is == NULL) {
+			if (error != NULL) {
+				g_warning("%s", error->message);
+				g_error_free(error);
+			} else
+				g_printerr("input_stream_open() failed\n");
 
-		ret = input_stream_open(&is, decoder.uri);
-		if (!ret)
 			return 1;
+		}
 
-		decoder_plugin_stream_decode(decoder.plugin, &decoder, &is);
+		decoder_plugin_stream_decode(decoder.plugin, &decoder, is);
 
-		input_stream_close(&is);
+		input_stream_close(is);
 	} else {
 		g_printerr("Decoder plugin is not usable\n");
 		return 1;

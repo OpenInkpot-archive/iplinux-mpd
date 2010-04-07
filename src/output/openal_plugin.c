@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -58,24 +58,28 @@ openal_output_quark(void)
 static ALenum
 openal_audio_format(struct audio_format *audio_format)
 {
-	/* Only 8 and 16 bit samples are supported */
-	if (audio_format->bits != 16 && audio_format->bits != 8)
-		audio_format->bits = 16;
-
-	switch (audio_format->bits)
-	{
-	case 16:
+	switch (audio_format->format) {
+	case SAMPLE_FORMAT_S16:
 		if (audio_format->channels == 2)
 			return AL_FORMAT_STEREO16;
 		if (audio_format->channels == 1)
 			return AL_FORMAT_MONO16;
 		break;
 
-	case 8:
+	case SAMPLE_FORMAT_S8:
 		if (audio_format->channels == 2)
 			return AL_FORMAT_STEREO8;
 		if (audio_format->channels == 1)
 			return AL_FORMAT_MONO8;
+		break;
+
+	default:
+		/* fall back to 16 bit */
+		audio_format->format = SAMPLE_FORMAT_S16;
+		if (audio_format->channels == 2)
+			return AL_FORMAT_STEREO16;
+		if (audio_format->channels == 1)
+			return AL_FORMAT_MONO16;
 		break;
 	}
 

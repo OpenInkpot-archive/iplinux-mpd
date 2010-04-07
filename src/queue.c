@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -46,14 +46,14 @@ queue_next_order(const struct queue *queue, unsigned order)
 
 	if (queue->single)
 	{
-		if (queue->repeat)
+		if (queue->repeat && !queue->consume)
 			return order;
 		else
 			return -1;
 	}
 	if (order + 1 < queue->length)
 		return order + 1;
-	else if (queue->repeat)
+	else if (queue->repeat && (order > 0 || !queue->consume))
 		/* restart at first song */
 		return 0;
 	else

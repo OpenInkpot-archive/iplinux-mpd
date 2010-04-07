@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -91,6 +91,13 @@ struct player {
 	 * The number of chunks used for crossfading.
 	 */
 	unsigned cross_fade_chunks;
+
+	/**
+	 * The tag of the "next" song during cross-fade.  It is
+	 * postponed, and sent to the output thread when the new song
+	 * really begins.
+	 */
+	struct tag *cross_fade_tag;
 
 	/**
 	 * The current audio format for the audio outputs.
@@ -212,8 +219,7 @@ player_wait_for_decoder(struct player *player)
 	player_lock();
 
 	/* update player_control's song information */
-	pc.total_time = pc.next_song->tag != NULL
-		? pc.next_song->tag->time : 0;
+	pc.total_time = song_get_duration(pc.next_song);
 	pc.bit_rate = 0;
 	audio_format_clear(&pc.audio_format);
 
@@ -226,6 +232,26 @@ player_wait_for_decoder(struct player *player)
 	event_pipe_emit(PIPE_EVENT_PLAYLIST);
 
 	return true;
+}
+
+/**
+ * Returns the real duration of the song, comprising the duration
+ * indicated by the decoder plugin.
+ */
+static double
+real_song_duration(const struct song *song, double decoder_duration)
+{
+	assert(song != NULL);
+
+	if (decoder_duration <= 0.0)
+		/* the decoder plugin didn't provide information; fall
+		   back to song_get_duration() */
+		return song_get_duration(song);
+
+	if (song->end_ms > 0 && song->end_ms / 1000.0 < decoder_duration)
+		return (song->end_ms - song->start_ms) / 1000.0;
+
+	return decoder_duration - song->start_ms / 1000.0;
 }
 
 /**
@@ -266,7 +292,7 @@ player_check_decoder_startup(struct player *player)
 			return true;
 
 		player_lock();
-		pc.total_time = dc->total_time;
+		pc.total_time = real_song_duration(dc->song, dc->total_time);
 		pc.audio_format = dc->in_audio_format;
 		player_unlock();
 
@@ -352,13 +378,14 @@ player_send_silence(struct player *player)
  */
 static bool player_seek_decoder(struct player *player)
 {
+	struct song *song = pc.next_song;
 	struct decoder_control *dc = player->dc;
 	double where;
 	bool ret;
 
 	assert(pc.next_song != NULL);
 
-	if (decoder_current_song(dc) != pc.next_song) {
+	if (decoder_current_song(dc) != song) {
 		/* the decoder is already decoding the "next" song -
 		   stop it and start the previous song again */
 
@@ -400,7 +427,7 @@ static bool player_seek_decoder(struct player *player)
 	if (where < 0.0)
 		where = 0.0;
 
-	ret = dc_seek(dc, where);
+	ret = dc_seek(dc, where + song->start_ms / 1000.0);
 	if (!ret) {
 		/* decoder failure */
 		player_command_finished();
@@ -426,7 +453,7 @@ static bool player_seek_decoder(struct player *player)
  */
 static void player_process_command(struct player *player)
 {
-	struct decoder_control *dc = player->dc;
+	G_GNUC_UNUSED struct decoder_control *dc = player->dc;
 
 	switch (pc.command) {
 	case PLAYER_COMMAND_NONE:
@@ -624,13 +651,29 @@ play_next_chunk(struct player *player)
 		}
 
 		if (other_chunk != NULL) {
+			float mix_ratio;
+
 			chunk = music_pipe_shift(player->pipe);
 			assert(chunk != NULL);
 
+			/* don't send the tags of the new song (which
+			   is being faded in) yet; postpone it until
+			   the current song is faded out */
+			player->cross_fade_tag =
+				tag_merge_replace(player->cross_fade_tag,
+						  other_chunk->tag);
+			other_chunk->tag = NULL;
+
+			if (isnan(pc.mixramp_delay_seconds)) {
+				mix_ratio = ((float)cross_fade_position)
+					     / player->cross_fade_chunks;
+			} else {
+				mix_ratio = nan("");
+			}
+
 			cross_fade_apply(chunk, other_chunk,
 					 &dc->out_audio_format,
-					 cross_fade_position,
-					 player->cross_fade_chunks);
+					 mix_ratio);
 			music_buffer_return(player_buffer, other_chunk);
 		} else {
 			/* there are not enough decoded chunks yet */
@@ -658,6 +701,14 @@ play_next_chunk(struct player *player)
 		chunk = music_pipe_shift(player->pipe);
 
 	assert(chunk != NULL);
+
+	/* insert the postponed tag if cross-fading is finished */
+
+	if (player->xfade != XFADE_ENABLED && player->cross_fade_tag != NULL) {
+		chunk->tag = tag_merge_replace(chunk->tag,
+					       player->cross_fade_tag);
+		player->cross_fade_tag = NULL;
+	}
 
 	/* play the current chunk */
 
@@ -716,6 +767,8 @@ player_song_border(struct player *player)
 	music_pipe_free(player->pipe);
 	player->pipe = player->dc->pipe;
 
+	audio_output_all_song_border();
+
 	if (!player_wait_for_decoder(player))
 		return false;
 
@@ -739,6 +792,7 @@ static void do_play(struct decoder_control *dc)
 		.xfade = XFADE_UNKNOWN,
 		.cross_fading = false,
 		.cross_fade_chunks = 0,
+		.cross_fade_tag = NULL,
 		.elapsed_time = 0.0,
 	};
 
@@ -802,10 +856,17 @@ static void do_play(struct decoder_control *dc)
 		if (player.decoder_starting) {
 			/* wait until the decoder is initialized completely */
 			bool success;
+			const struct song *song;
 
 			success = player_check_decoder_startup(&player);
 			if (!success)
 				break;
+
+			/* seek to the beginning of the range */
+			song = decoder_current_song(dc);
+			if (song != NULL && song->start_ms > 0 &&
+			    !dc_seek(dc, song->start_ms / 1000.0))
+				player_dc_stop(&player);
 
 			player_lock();
 			continue;
@@ -836,6 +897,10 @@ static void do_play(struct decoder_control *dc)
 			   for it */
 			player.cross_fade_chunks =
 				cross_fade_calc(pc.cross_fade_seconds, dc->total_time,
+						pc.mixramp_db,
+						pc.mixramp_delay_seconds,
+						dc->mixramp_start,
+						dc->mixramp_prev_end,
 						&dc->out_audio_format,
 						&player.play_audio_format,
 						music_buffer_size(player_buffer) -
@@ -898,6 +963,9 @@ static void do_play(struct decoder_control *dc)
 	music_pipe_clear(player.pipe, player_buffer);
 	music_pipe_free(player.pipe);
 
+	if (player.cross_fade_tag != NULL)
+		tag_free(player.cross_fade_tag);
+
 	player_lock();
 
 	if (player.queued) {
@@ -949,7 +1017,7 @@ static gpointer player_task(G_GNUC_UNUSED gpointer arg)
 		case PLAYER_COMMAND_CLOSE_AUDIO:
 			player_unlock();
 
-			audio_output_all_close();
+			audio_output_all_release();
 
 			player_lock();
 			player_command_finished_locked();

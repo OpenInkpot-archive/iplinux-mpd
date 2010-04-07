@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -172,7 +172,7 @@ static void tag_delete_item(struct tag *tag, unsigned idx)
 
 	if (tag->num_items - idx > 0) {
 		memmove(tag->items + idx, tag->items + idx + 1,
-			tag->num_items - idx);
+			(tag->num_items - idx) * sizeof(tag->items[0]));
 	}
 
 	if (tag->num_items > 0) {
@@ -280,6 +280,22 @@ tag_merge(const struct tag *base, const struct tag *add)
 	}
 
 	return ret;
+}
+
+struct tag *
+tag_merge_replace(struct tag *base, struct tag *add)
+{
+	if (add == NULL)
+		return base;
+
+	if (base == NULL)
+		return add;
+
+	struct tag *tag = tag_merge(base, add);
+	tag_free(base);
+	tag_free(add);
+
+	return tag;
 }
 
 const char *

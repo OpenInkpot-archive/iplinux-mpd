@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -49,14 +49,18 @@ filter_configured_new(const struct config_param *param, GError **error_r)
 	assert(error_r == NULL || *error_r == NULL);
 
 	plugin_name = config_get_block_string(param, "plugin", NULL);
-	if (plugin_name == NULL)
+	if (plugin_name == NULL) {
 		g_set_error(error_r, config_quark(), 0,
 			    "No filter plugin specified");
+		return NULL;
+	}
 
 	plugin = filter_plugin_by_name(plugin_name);
-	if (plugin == NULL)
+	if (plugin == NULL) {
 		g_set_error(error_r, config_quark(), 0,
 			    "No such filter plugin: %s", plugin_name);
+		return NULL;
+	}
 
 	return filter_new(plugin, param, error_r);
 }
@@ -70,18 +74,23 @@ filter_free(struct filter *filter)
 }
 
 const struct audio_format *
-filter_open(struct filter *filter, const struct audio_format *audio_format,
+filter_open(struct filter *filter, struct audio_format *audio_format,
 	    GError **error_r)
 {
+	const struct audio_format *out_audio_format;
+
 	assert(filter != NULL);
 	assert(audio_format != NULL);
 	assert(audio_format_valid(audio_format));
 	assert(error_r == NULL || *error_r == NULL);
 
-	audio_format = filter->plugin->open(filter, audio_format, error_r);
-	assert(audio_format == NULL || audio_format_valid(audio_format));
+	out_audio_format = filter->plugin->open(filter, audio_format, error_r);
 
-	return audio_format;
+	assert(out_audio_format == NULL || audio_format_valid(audio_format));
+	assert(out_audio_format == NULL ||
+	       audio_format_valid(out_audio_format));
+
+	return out_audio_format;
 }
 
 void

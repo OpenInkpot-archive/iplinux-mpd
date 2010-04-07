@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -75,7 +75,7 @@ searchInDirectory(struct song *song, void *_data)
 	struct search_data *data = _data;
 
 	if (locate_song_search(song, data->criteria))
-		return song_print_info(data->client, song);
+		song_print_info(data->client, song);
 
 	return 0;
 }
@@ -105,7 +105,7 @@ findInDirectory(struct song *song, void *_data)
 	struct search_data *data = _data;
 
 	if (locate_song_match(song, data->criteria))
-		return song_print_info(data->client, song);
+		song_print_info(data->client, song);
 
 	return 0;
 }
@@ -135,8 +135,7 @@ searchStatsInDirectory(struct song *song, void *data)
 
 	if (locate_song_match(song, stats->criteria)) {
 		stats->numberOfSongs++;
-		if (song->tag->time > 0)
-			stats->playTime += song->tag->time;
+		stats->playTime += song_get_duration(song);
 	}
 
 	return 0;
@@ -257,6 +256,7 @@ visitTag(struct client *client, struct strset *set,
 	 struct song *song, enum tag_type tagType)
 {
 	struct tag *tag = song->tag;
+	bool found = false;
 
 	if (tagType == LOCATE_TAG_FILE_TYPE) {
 		song_print_uri(client, song);
@@ -269,11 +269,12 @@ visitTag(struct client *client, struct strset *set,
 	for (unsigned i = 0; i < tag->num_items; i++) {
 		if (tag->items[i]->type == tagType) {
 			strset_add(set, tag->items[i]->value);
-			return;
+			found = true;
 		}
 	}
 
-	strset_add(set, "");
+	if (!found)
+		strset_add(set, "");
 }
 
 struct list_tags_data {

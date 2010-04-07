@@ -10,16 +10,24 @@ ver 0.16 (20??/??/??)
   - "load" supports remote playlists (extm3u, pls, asx, xspf, lastfm://)
   - allow changing replay gain mode on-the-fly
   - omitting the range end is possible
+  - "update" checks if the path is malformed
+* archive:
+  - iso: renamed plugin to "iso9660"
+  - zip: renamed plugin to "zzip"
 * input:
   - lastfm: obsolete plugin removed
 * tags:
   - added tags "ArtistSort", "AlbumArtistSort"
   - id3: revised "performer" tag support
 * decoders:
+  - don't try a plugin twice (MIME type & suffix)
+  - don't fall back to "mad" unless no plugin matches
   - ffmpeg: support multiple tags
   - ffmpeg: convert metadata to generic format
+  - ffmpeg: implement the libavutil log callback
   - sndfile: new decoder plugin based on libsndfile
-  - flac: load external cue sheet when no internal one
+  - flac: moved CUE sheet support to a playlist plugin
+  - flac: support streams without STREAMINFO block
   - mikmod: sample rate is configurable
   - mpg123: new decoder plugin based on libmpg123
   - sidplay: support sub-tunes
@@ -62,6 +70,12 @@ ver 0.16 (20??/??/??)
   - support .mpdignore files in the music directory
   - sort songs by album name first, then disc/track number
   - rescan after metadata_to_use change
+* normalize: upgraded to AudioCompress 2.0
+  - automatically convert to 16 bit samples
+* replay gain:
+  - reimplemented as a filter plugin
+  - fall back to track gain if album gain is unavailable
+  - optionally use hardware mixer to apply replay gain
 * log unused/unknown block parameters
 * removed the deprecated "error_file" option
 * save state when stopped
@@ -72,12 +86,54 @@ ver 0.16 (20??/??/??)
 * log: redirect stdout/stderr to /dev/null if syslog is used
 * set the close-on-exec flag on all file descriptors
 * pcm_volume, pcm_mix: implemented 32 bit support
+* support packed 24 bit samples
+* CUE sheet support
+* support for MixRamp tags
 * obey $(sysconfdir) for default mpd.conf location
 * build with large file support by default
+* added test suite ("make check")
 * require GLib 2.12
+* added libwrap support
 
 
-ver 0.15.7 (2009/??/??)
+ver 0.15.9 (2010/03/21)
+* decoders:
+  - mad: fix crash when seeking at end of song
+  - mpcdec: fix negative shift on fixed-point samples
+  - mpcdec: fix replay gain formula with v8
+* playlist: fix single+repeat in random mode
+* player: postpone song tags during cross-fade
+
+
+ver 0.15.8 (2010/01/17)
+* input:
+  - curl: allow rewinding with Icy-Metadata
+* decoders:
+  - ffmpeg, flac, vorbis: added more flac/vorbis MIME types
+  - ffmpeg: enabled libavformat's file name extension detection
+* dbUtils: return empty tag value only if no value was found
+* decoder_thread: fix CUE track playback
+* queue: don't repeat current song in consume mode
+
+
+ver 0.15.7 (2009/12/27)
+* archive:
+  - close archive when stream is closed
+  - iso, zip: fixed memory leak in destructor
+* input:
+  - file: don't fall back to parent directory
+  - archive: fixed memory leak in error handler
+* tags:
+  - id3: fix ID3v1 charset conversion
+* decoders:
+  - eliminate jitter after seek failure
+  - ffmpeg: don't try to force stereo
+  - wavpack: allow fine-grained seeking
+* mixer: explicitly close all mixers on shutdown
+* mapper: fix memory leak when playlist_directory is not set
+* mapper: apply filesystem_charset to playlists
+* command: verify playlist name in the "rm" command
+* database: return multiple tag values per song
 
 
 ver 0.15.6 (2009/11/18)

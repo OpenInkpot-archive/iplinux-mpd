@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -34,16 +34,22 @@
  * calling input_stream_buffer().  We shouldn't hold the lock during a
  * potentially blocking operation.
  */
-static int
+static bool
 decoder_input_buffer(struct decoder_control *dc, struct input_stream *is)
 {
+	GError *error = NULL;
 	int ret;
 
 	decoder_unlock(dc);
-	ret = input_stream_buffer(is) > 0;
+	ret = input_stream_buffer(is, &error);
+	if (ret < 0) {
+		g_warning("%s", error->message);
+		g_error_free(error);
+	}
+
 	decoder_lock(dc);
 
-	return ret;
+	return ret > 0;
 }
 
 /**
@@ -57,7 +63,7 @@ need_chunks(struct decoder_control *dc, struct input_stream *is, bool do_wait)
 	    dc->command == DECODE_COMMAND_SEEK)
 		return dc->command;
 
-	if ((is == NULL || decoder_input_buffer(dc, is) <= 0) && do_wait) {
+	if ((is == NULL || !decoder_input_buffer(dc, is)) && do_wait) {
 		decoder_wait(dc);
 		player_signal();
 
@@ -80,8 +86,15 @@ decoder_get_chunk(struct decoder *decoder, struct input_stream *is)
 
 	do {
 		decoder->chunk = music_buffer_allocate(dc->buffer);
-		if (decoder->chunk != NULL)
+		if (decoder->chunk != NULL) {
+			decoder->chunk->replay_gain_serial =
+				decoder->replay_gain_serial;
+			if (decoder->replay_gain_serial != 0)
+				decoder->chunk->replay_gain_info =
+					decoder->replay_gain_info;
+
 			return decoder->chunk;
+		}
 
 		decoder_lock(dc);
 		cmd = need_chunks(dc, is, true);

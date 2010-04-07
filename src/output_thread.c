@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -26,6 +26,7 @@
 #include "player_control.h"
 #include "filter_plugin.h"
 #include "filter/convert_filter_plugin.h"
+#include "filter/replay_gain_filter_plugin.h"
 
 #include <glib.h>
 
@@ -259,6 +260,17 @@ ao_play_chunk(struct audio_output *ao, const struct music_chunk *chunk)
 		g_mutex_unlock(ao->mutex);
 		ao_plugin_send_tag(ao->plugin, ao->data, chunk->tag);
 		g_mutex_lock(ao->mutex);
+	}
+
+	/* update replay gain */
+
+	if (ao->replay_gain_filter != NULL &&
+	    chunk->replay_gain_serial != ao->replay_gain_serial) {
+		replay_gain_filter_set_info(ao->replay_gain_filter,
+					    chunk->replay_gain_serial != 0
+					    ? &chunk->replay_gain_info
+					    : NULL);
+		ao->replay_gain_serial = chunk->replay_gain_serial;
 	}
 
 	if (size == 0)

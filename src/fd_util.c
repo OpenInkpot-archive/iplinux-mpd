@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * Redistribution and use in source and binary forms, with or without
@@ -39,6 +39,7 @@
 #include <errno.h>
 
 #ifdef WIN32
+#include <ws2tcpip.h>
 #include <winsock2.h>
 #else
 #include <sys/socket.h>
@@ -124,7 +125,7 @@ int
 pipe_cloexec(int fd[2])
 {
 #ifdef WIN32
-	return _pipe(event_pipe, 512, _O_BINARY);
+	return _pipe(fd, 512, _O_BINARY);
 #else
 	int ret;
 
@@ -148,7 +149,7 @@ int
 pipe_cloexec_nonblock(int fd[2])
 {
 #ifdef WIN32
-	return _pipe(event_pipe, 512, _O_BINARY);
+	return _pipe(fd, 512, _O_BINARY);
 #else
 	int ret;
 

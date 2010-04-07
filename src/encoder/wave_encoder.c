@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -114,16 +114,39 @@ wave_encoder_open(struct encoder *_encoder,
 	struct wave_encoder *encoder = (struct wave_encoder *)_encoder;
 	void *buffer;
 
-	encoder->bits = audio_format->bits;
+	assert(audio_format_valid(audio_format));
+
+	switch (audio_format->format) {
+	case SAMPLE_FORMAT_S8:
+		encoder->bits = 8;
+		break;
+
+	case SAMPLE_FORMAT_S16:
+		encoder->bits = 16;
+		break;
+
+	case SAMPLE_FORMAT_S24_P32:
+		encoder->bits = 24;
+		break;
+
+	case SAMPLE_FORMAT_S32:
+		encoder->bits = 32;
+		break;
+
+	default:
+		audio_format->format = SAMPLE_FORMAT_S16;
+		encoder->bits = 16;
+		break;
+	}
 
 	buffer = pcm_buffer_get(&encoder->buffer, sizeof(struct wave_header) );
 
 	/* create PCM wave header in initial buffer */
 	fill_wave_header((struct wave_header *) buffer, 
 			audio_format->channels,
-			audio_format->bits,
+			 encoder->bits,
 			audio_format->sample_rate,
-			(audio_format->bits / 8) * audio_format->channels );
+			 (encoder->bits / 8) * audio_format->channels );
 
 	encoder->buffer_length = sizeof(struct wave_header);
 	return true;
@@ -230,6 +253,12 @@ wave_encoder_read(struct encoder *_encoder, void *dest, size_t length)
 	return length;
 }
 
+static const char *
+wave_encoder_get_mime_type(G_GNUC_UNUSED struct encoder *_encoder)
+{
+	return "audio/wav";
+}
+
 const struct encoder_plugin wave_encoder_plugin = {
 	.name = "wave",
 	.init = wave_encoder_init,
@@ -237,4 +266,5 @@ const struct encoder_plugin wave_encoder_plugin = {
 	.open = wave_encoder_open,
 	.write = wave_encoder_write,
 	.read = wave_encoder_read,
+	.get_mime_type = wave_encoder_get_mime_type,
 };

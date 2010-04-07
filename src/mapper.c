@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -192,14 +192,19 @@ map_spl_path(void)
 char *
 map_spl_utf8_to_fs(const char *name)
 {
-	char *filename = g_strconcat(name, PLAYLIST_FILE_SUFFIX, NULL);
-	char *path;
+	char *filename_utf8, *filename_fs, *path;
 
 	if (playlist_dir == NULL)
 		return NULL;
 
-	path = g_build_filename(playlist_dir, filename, NULL);
-	g_free(filename);
+	filename_utf8 = g_strconcat(name, PLAYLIST_FILE_SUFFIX, NULL);
+	filename_fs = utf8_to_fs_charset(filename_utf8);
+	g_free(filename_utf8);
+	if (filename_fs == NULL)
+		return NULL;
+
+	path = g_build_filename(playlist_dir, filename_fs, NULL);
+	g_free(filename_fs);
 
 	return path;
 }

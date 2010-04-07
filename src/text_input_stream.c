@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -57,6 +57,7 @@ text_input_stream_free(struct text_input_stream *tis)
 const char *
 text_input_stream_read(struct text_input_stream *tis)
 {
+	GError *error = NULL;
 	void *dest;
 	const char *src, *p;
 	size_t length, nbytes;
@@ -67,9 +68,15 @@ text_input_stream_read(struct text_input_stream *tis)
 	do {
 		dest = fifo_buffer_write(tis->buffer, &length);
 		if (dest != NULL) {
-			nbytes = input_stream_read(tis->is, dest, length);
+			nbytes = input_stream_read(tis->is, dest, length,
+						   &error);
 			if (nbytes > 0)
 				fifo_buffer_append(tis->buffer, nbytes);
+			else if (error != NULL) {
+				g_warning("%s", error->message);
+				g_error_free(error);
+				return NULL;
+			}
 		}
 
 		src = fifo_buffer_read(tis->buffer, &length);

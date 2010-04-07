@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -46,10 +46,23 @@ song_print_uri(struct client *client, struct song *song)
 	}
 }
 
-int
+void
 song_print_info(struct client *client, struct song *song)
 {
 	song_print_uri(client, song);
+
+	if (song->start_ms > 0 || song->end_ms > 0) {
+		if (song->end_ms > 0)
+			client_printf(client, "Range: %u.%03u-%u.%03u\n",
+				      song->start_ms / 1000,
+				      song->start_ms % 1000,
+				      song->end_ms / 1000,
+				      song->end_ms % 1000);
+		else
+			client_printf(client, "Range: %u.%03u-\n",
+				      song->start_ms / 1000,
+				      song->start_ms % 1000);
+	}
 
 	if (song->mtime > 0) {
 #ifndef G_OS_WIN32
@@ -74,18 +87,19 @@ song_print_info(struct client *client, struct song *song)
 
 	if (song->tag)
 		tag_print(client, song->tag);
-
-	return 0;
 }
 
 static int
 song_print_info_x(struct song *song, void *data)
 {
 	struct client *client = data;
-	return song_print_info(client, song);
+	song_print_info(client, song);
+
+	return 0;
 }
 
-int songvec_print(struct client *client, const struct songvec *sv)
+void
+songvec_print(struct client *client, const struct songvec *sv)
 {
-	return songvec_for_each(sv, song_print_info_x, client);
+	songvec_for_each(sv, song_print_info_x, client);
 }

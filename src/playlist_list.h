@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -54,12 +54,10 @@ playlist_list_open_stream(struct input_stream *is, const char *uri);
 /**
  * Opens a playlist from a local file.
  *
- * @param is an uninitialized #input_stream object (must be closed
- * with input_stream_close() if this function succeeds)
  * @param path_fs the path of the playlist file
  * @return a playlist, or NULL on error
  */
 struct playlist_provider *
-playlist_list_open_path(struct input_stream *is, const char *path_fs);
+playlist_list_open_path(const char *path_fs);
 
 #endif

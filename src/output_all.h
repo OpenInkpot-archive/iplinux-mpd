@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -92,6 +92,13 @@ void
 audio_output_all_close(void);
 
 /**
+ * Closes all audio outputs.  Outputs with the "always_on" flag are
+ * put into pause mode.
+ */
+void
+audio_output_all_release(void);
+
+/**
  * Enqueue a #music_chunk object for playing, i.e. pushes it to a
  * #music_pipe.
  *
@@ -140,6 +147,12 @@ audio_output_all_drain(void);
  */
 void
 audio_output_all_cancel(void);
+
+/**
+ * Indicate that a new song will begin now.
+ */
+void
+audio_output_all_song_border(void);
 
 /**
  * Returns the "elapsed_time" stamp of the most recently finished

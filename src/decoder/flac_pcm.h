@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -20,11 +20,13 @@
 #ifndef MPD_FLAC_PCM_H
 #define MPD_FLAC_PCM_H
 
+#include "audio_format.h"
+
 #include <FLAC/ordinals.h>
 
 void
 flac_convert(void *dest,
-	     unsigned int num_channels, unsigned sample_format,
+	     unsigned int num_channels, enum sample_format sample_format,
 	     const FLAC__int32 *const buf[],
 	     unsigned int position, unsigned int end);
 

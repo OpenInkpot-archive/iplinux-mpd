@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -31,6 +31,18 @@ struct song {
 	struct tag *tag;
 	struct directory *parent;
 	time_t mtime;
+
+	/**
+	 * Start of this sub-song within the file in milliseconds.
+	 */
+	unsigned start_ms;
+
+	/**
+	 * End of this sub-song within the file in milliseconds.
+	 * Unused if zero.
+	 */
+	unsigned end_ms;
+
 	char uri[sizeof(int)];
 };
 
@@ -68,6 +80,9 @@ song_file_update_inarchive(struct song *song);
  */
 char *
 song_get_uri(const struct song *song);
+
+double
+song_get_duration(const struct song *song);
 
 static inline bool
 song_in_database(const struct song *song)

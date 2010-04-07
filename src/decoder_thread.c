@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -23,6 +23,7 @@
 #include "decoder_internal.h"
 #include "decoder_list.h"
 #include "decoder_plugin.h"
+#include "decoder_api.h"
 #include "input_stream.h"
 #include "player_control.h"
 #include "pipe.h"
@@ -35,6 +36,9 @@
 #include <glib.h>
 
 #include <unistd.h>
+
+#undef G_LOG_DOMAIN
+#define G_LOG_DOMAIN "decoder_thread"
 
 static enum decoder_command
 decoder_lock_get_command(struct decoder_control *dc)
@@ -56,15 +60,24 @@ decoder_lock_get_command(struct decoder_control *dc)
  *
  * Unlock the decoder before calling this function.
  *
- * @return true on success of if #DECODE_COMMAND_STOP is received,
- * false on error
+ * @return an input_stream on success or if #DECODE_COMMAND_STOP is
+ * received, NULL on error
  */
-static bool
-decoder_input_stream_open(struct decoder_control *dc,
-			  struct input_stream *is, const char *uri)
+static struct input_stream *
+decoder_input_stream_open(struct decoder_control *dc, const char *uri)
 {
-	if (!input_stream_open(is, uri))
-		return false;
+	GError *error = NULL;
+	struct input_stream *is;
+
+	is = input_stream_open(uri, &error);
+	if (is == NULL) {
+		if (error != NULL) {
+			g_warning("%s", error->message);
+			g_error_free(error);
+		}
+
+		return NULL;
+	}
 
 	/* wait for the input stream to become ready; its metadata
 	   will be available then */
@@ -73,14 +86,16 @@ decoder_input_stream_open(struct decoder_control *dc,
 	       decoder_lock_get_command(dc) != DECODE_COMMAND_STOP) {
 		int ret;
 
-		ret = input_stream_buffer(is);
+		ret = input_stream_buffer(is, &error);
 		if (ret < 0) {
 			input_stream_close(is);
-			return false;
+			g_warning("%s", error->message);
+			g_error_free(error);
+			return NULL;
 		}
 	}
 
-	return true;
+	return is;
 }
 
 static bool
@@ -103,7 +118,7 @@ decoder_stream_decode(const struct decoder_plugin *plugin,
 	decoder_unlock(decoder->dc);
 
 	/* rewind the stream, so each plugin gets a fresh start */
-	input_stream_seek(input_stream, 0, SEEK_SET);
+	input_stream_seek(input_stream, 0, SEEK_SET, NULL);
 
 	decoder_plugin_stream_decode(plugin, decoder, input_stream);
 
@@ -144,21 +159,49 @@ decoder_file_decode(const struct decoder_plugin *plugin,
 }
 
 /**
+ * Hack to allow tracking const decoder plugins in a GSList.
+ */
+static inline gpointer
+deconst_plugin(const struct decoder_plugin *plugin)
+{
+	union {
+		const struct decoder_plugin *in;
+		gpointer out;
+	} u = { .in = plugin };
+
+	return u.out;
+}
+
+/**
  * Try decoding a stream, using plugins matching the stream's MIME type.
+ *
+ * @param tried_r a list of plugins which were tried
  */
 static bool
-decoder_run_stream_mime_type(struct decoder *decoder, struct input_stream *is)
+decoder_run_stream_mime_type(struct decoder *decoder, struct input_stream *is,
+			     GSList **tried_r)
 {
+	assert(tried_r != NULL);
+
 	const struct decoder_plugin *plugin;
 	unsigned int next = 0;
 
 	if (is->mime == NULL)
 		return false;
 
-	while ((plugin = decoder_plugin_from_mime_type(is->mime, next++)))
-		if (plugin->stream_decode != NULL &&
-		    decoder_stream_decode(plugin, decoder, is))
+	while ((plugin = decoder_plugin_from_mime_type(is->mime, next++))) {
+		if (plugin->stream_decode == NULL)
+			continue;
+
+		if (g_slist_find(*tried_r, plugin) != NULL)
+			/* don't try a plugin twice */
+			continue;
+
+		if (decoder_stream_decode(plugin, decoder, is))
 			return true;
+
+		*tried_r = g_slist_prepend(*tried_r, deconst_plugin(plugin));
+	}
 
 	return false;
 }
@@ -166,21 +209,34 @@ decoder_run_stream_mime_type(struct decoder *decoder, struct input_stream *is)
 /**
  * Try decoding a stream, using plugins matching the stream's URI
  * suffix.
+ *
+ * @param tried_r a list of plugins which were tried
  */
 static bool
 decoder_run_stream_suffix(struct decoder *decoder, struct input_stream *is,
-			  const char *uri)
+			  const char *uri, GSList **tried_r)
 {
+	assert(tried_r != NULL);
+
 	const char *suffix = uri_get_suffix(uri);
 	const struct decoder_plugin *plugin = NULL;
 
 	if (suffix == NULL)
 		return false;
 
-	while ((plugin = decoder_plugin_from_suffix(suffix, plugin)) != NULL)
-		if (plugin->stream_decode != NULL &&
-		    decoder_stream_decode(plugin, decoder, is))
+	while ((plugin = decoder_plugin_from_suffix(suffix, plugin)) != NULL) {
+		if (plugin->stream_decode == NULL)
+			continue;
+
+		if (g_slist_find(*tried_r, plugin) != NULL)
+			/* don't try a plugin twice */
+			continue;
+
+		if (decoder_stream_decode(plugin, decoder, is))
 			return true;
+
+		*tried_r = g_slist_prepend(*tried_r, deconst_plugin(plugin));
+	}
 
 	return false;
 }
@@ -205,29 +261,36 @@ static bool
 decoder_run_stream(struct decoder *decoder, const char *uri)
 {
 	struct decoder_control *dc = decoder->dc;
-	struct input_stream input_stream;
+	struct input_stream *input_stream;
 	bool success;
 
 	decoder_unlock(dc);
 
-	if (!decoder_input_stream_open(dc, &input_stream, uri)) {
+	input_stream = decoder_input_stream_open(dc, uri);
+	if (input_stream == NULL) {
 		decoder_lock(dc);
 		return false;
 	}
 
 	decoder_lock(dc);
 
+	GSList *tried = NULL;
+
 	success = dc->command == DECODE_COMMAND_STOP ||
 		/* first we try mime types: */
-		decoder_run_stream_mime_type(decoder, &input_stream) ||
+		decoder_run_stream_mime_type(decoder, input_stream, &tried) ||
 		/* if that fails, try suffix matching the URL: */
-		decoder_run_stream_suffix(decoder, &input_stream, uri) ||
+		decoder_run_stream_suffix(decoder, input_stream, uri,
+					  &tried) ||
 		/* fallback to mp3: this is needed for bastard streams
 		   that don't have a suffix or set the mimeType */
-		decoder_run_stream_fallback(decoder, &input_stream);
+		(tried == NULL &&
+		 decoder_run_stream_fallback(decoder, input_stream));
+
+	g_slist_free(tried);
 
 	decoder_unlock(dc);
-	input_stream_close(&input_stream);
+	input_stream_close(input_stream);
 	decoder_lock(dc);
 
 	return success;
@@ -257,21 +320,21 @@ decoder_run_file(struct decoder *decoder, const char *path_fs)
 
 			decoder_unlock(dc);
 		} else if (plugin->stream_decode != NULL) {
-			struct input_stream input_stream;
+			struct input_stream *input_stream;
 			bool success;
 
-			if (!decoder_input_stream_open(dc, &input_stream,
-						       path_fs))
+			input_stream = decoder_input_stream_open(dc, path_fs);
+			if (input_stream == NULL)
 				continue;
 
 			decoder_lock(dc);
 
 			success = decoder_stream_decode(plugin, decoder,
-							&input_stream);
+							input_stream);
 
 			decoder_unlock(dc);
 
-			input_stream_close(&input_stream);
+			input_stream_close(input_stream);
 
 			if (success) {
 				decoder_lock(dc);
@@ -293,6 +356,7 @@ decoder_run_song(struct decoder_control *dc,
 	};
 	int ret;
 
+	decoder.timestamp = 0.0;
 	decoder.seeking = false;
 	decoder.song_tag = song->tag != NULL && song_is_file(song)
 		? tag_dup(song->tag) : NULL;
@@ -316,6 +380,7 @@ decoder_run_song(struct decoder_control *dc,
 	pcm_convert_deinit(&decoder.conv_state);
 
 	/* flush the last chunk */
+
 	if (decoder.chunk != NULL)
 		decoder_flush_chunk(&decoder);
 
@@ -369,6 +434,13 @@ decoder_task(gpointer arg)
 
 		switch (dc->command) {
 		case DECODE_COMMAND_START:
+			g_debug("clearing mixramp tags");
+			dc_mixramp_start(dc, NULL);
+			dc_mixramp_prev_end(dc, dc->mixramp_end);
+			dc->mixramp_end = NULL; /* Don't free, it's copied above. */
+
+                        /* fall through */
+
 		case DECODE_COMMAND_SEEK:
 			decoder_run(dc);
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -192,7 +192,7 @@ twolame_encoder_open(struct encoder *_encoder, struct audio_format *audio_format
 {
 	struct twolame_encoder *encoder = (struct twolame_encoder *)_encoder;
 
-	audio_format->bits = 16;
+	audio_format->format = SAMPLE_FORMAT_S16;
 	audio_format->channels = 2;
 
 	encoder->audio_format = *audio_format;
@@ -288,6 +288,12 @@ twolame_encoder_read(struct encoder *_encoder, void *dest, size_t length)
 	return length;
 }
 
+static const char *
+twolame_encoder_get_mime_type(G_GNUC_UNUSED struct encoder *_encoder)
+{
+	return "audio/mpeg";
+}
+
 const struct encoder_plugin twolame_encoder_plugin = {
 	.name = "twolame",
 	.init = twolame_encoder_init,
@@ -297,4 +303,5 @@ const struct encoder_plugin twolame_encoder_plugin = {
 	.flush = twolame_encoder_flush,
 	.write = twolame_encoder_write,
 	.read = twolame_encoder_read,
+	.get_mime_type = twolame_encoder_get_mime_type,
 };

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -25,8 +25,6 @@
 #include "audio.h"
 #include "song.h"
 #include "buffer.h"
-
-#include "normalize.h"
 #include "pipe.h"
 #include "chunk.h"
 
@@ -79,15 +77,6 @@ decoder_initialized(struct decoder *decoder,
 					       &af_string));
 }
 
-char *decoder_get_uri(G_GNUC_UNUSED struct decoder *decoder)
-{
-	const struct decoder_control *dc = decoder->dc;
-
-	assert(dc->pipe != NULL);
-
-	return song_get_uri(dc->song);
-}
-
 enum decoder_command decoder_get_command(G_GNUC_UNUSED struct decoder * decoder)
 {
 	const struct decoder_control *dc = decoder->dc;
@@ -97,7 +86,8 @@ enum decoder_command decoder_get_command(G_GNUC_UNUSED struct decoder * decoder)
 	return dc->command;
 }
 
-void decoder_command_finished(G_GNUC_UNUSED struct decoder * decoder)
+void
+decoder_command_finished(struct decoder *decoder)
 {
 	struct decoder_control *dc = decoder->dc;
 
@@ -108,7 +98,9 @@ void decoder_command_finished(G_GNUC_UNUSED struct decoder * decoder)
 	       dc->seek_error || decoder->seeking);
 	assert(dc->pipe != NULL);
 
-	if (dc->command == DECODE_COMMAND_SEEK) {
+	if (decoder->seeking) {
+		decoder->seeking = false;
+
 		/* delete frames from the old song position */
 
 		if (decoder->chunk != NULL) {
@@ -117,6 +109,8 @@ void decoder_command_finished(G_GNUC_UNUSED struct decoder * decoder)
 		}
 
 		music_pipe_clear(dc->pipe, dc->buffer);
+
+		decoder->timestamp = dc->seek_where;
 	}
 
 	dc->command = DECODE_COMMAND_NONE;
@@ -145,6 +139,8 @@ void decoder_seek_error(struct decoder * decoder)
 	assert(dc->pipe != NULL);
 
 	dc->seek_error = true;
+	decoder->seeking = false;
+
 	decoder_command_finished(decoder);
 }
 
@@ -154,6 +150,7 @@ size_t decoder_read(struct decoder *decoder,
 {
 	const struct decoder_control *dc =
 		decoder != NULL ? decoder->dc : NULL;
+	GError *error = NULL;
 	size_t nbytes;
 
 	assert(decoder == NULL ||
@@ -176,7 +173,14 @@ size_t decoder_read(struct decoder *decoder,
 		    dc->command != DECODE_COMMAND_NONE)
 			return 0;
 
-		nbytes = input_stream_read(is, buffer, length);
+		nbytes = input_stream_read(is, buffer, length, &error);
+
+		if (G_UNLIKELY(nbytes == 0 && error != NULL)) {
+			g_warning("%s", error->message);
+			g_error_free(error);
+			return 0;
+		}
+
 		if (nbytes > 0 || input_stream_eof(is))
 			return nbytes;
 
@@ -184,6 +188,15 @@ size_t decoder_read(struct decoder *decoder,
 		/* XXX don't sleep, wait for an event instead */
 		g_usleep(10000);
 	}
+}
+
+void
+decoder_timestamp(struct decoder *decoder, double t)
+{
+	assert(decoder != NULL);
+	assert(t >= 0);
+
+	decoder->timestamp = t;
 }
 
 /**
@@ -244,8 +257,7 @@ enum decoder_command
 decoder_data(struct decoder *decoder,
 	     struct input_stream *is,
 	     const void *_data, size_t length,
-	     float data_time, uint16_t bitRate,
-	     struct replay_gain_info *replay_gain_info)
+	     uint16_t kbit_rate)
 {
 	struct decoder_control *dc = decoder->dc;
 	const char *data = _data;
@@ -271,8 +283,8 @@ decoder_data(struct decoder *decoder,
 			/* merge with tag from decoder plugin */
 			struct tag *tag;
 
-			tag = tag_merge(decoder->stream_tag,
-					decoder->decoder_tag);
+			tag = tag_merge(decoder->decoder_tag,
+					decoder->stream_tag);
 			cmd = do_send_tag(decoder, is, tag);
 			tag_free(tag);
 		} else
@@ -310,7 +322,9 @@ decoder_data(struct decoder *decoder,
 		}
 
 		dest = music_chunk_write(chunk, &dc->out_audio_format,
-					 data_time, bitRate, &nbytes);
+					 decoder->timestamp -
+					 dc->song->start_ms / 1000.0,
+					 kbit_rate, &nbytes);
 		if (dest == NULL) {
 			/* the chunk is full, flush it */
 			decoder_flush_chunk(decoder);
@@ -327,14 +341,6 @@ decoder_data(struct decoder *decoder,
 
 		memcpy(dest, data, nbytes);
 
-		/* apply replay gain or normalization */
-
-		if (replay_gain_mode != REPLAY_GAIN_OFF)
-			replay_gain_apply(replay_gain_info, dest, nbytes,
-					  &dc->out_audio_format);
-		else if (normalizationEnabled)
-			normalizeData(dest, nbytes, &dc->out_audio_format);
-
 		/* expand the music pipe chunk */
 
 		full = music_chunk_expand(chunk, &dc->out_audio_format, nbytes);
@@ -346,6 +352,15 @@ decoder_data(struct decoder *decoder,
 
 		data += nbytes;
 		length -= nbytes;
+
+		decoder->timestamp += (double)nbytes /
+			audio_format_time_to_size(&dc->out_audio_format);
+
+		if (dc->song->end_ms > 0 &&
+		    decoder->timestamp >= dc->song->end_ms / 1000.0)
+			/* the end of this range has been reached:
+			   stop decoding */
+			return DECODE_COMMAND_STOP;
 	}
 
 	return DECODE_COMMAND_NONE;
@@ -355,7 +370,7 @@ enum decoder_command
 decoder_tag(G_GNUC_UNUSED struct decoder *decoder, struct input_stream *is,
 	    const struct tag *tag)
 {
-	const struct decoder_control *dc = decoder->dc;
+	G_GNUC_UNUSED const struct decoder_control *dc = decoder->dc;
 	enum decoder_command cmd;
 
 	assert(dc->state == DECODE_STATE_DECODE);
@@ -386,4 +401,41 @@ decoder_tag(G_GNUC_UNUSED struct decoder *decoder, struct input_stream *is,
 		cmd = do_send_tag(decoder, is, tag);
 
 	return cmd;
+}
+
+void
+decoder_replay_gain(struct decoder *decoder,
+		    const struct replay_gain_info *replay_gain_info)
+{
+	assert(decoder != NULL);
+
+	if (replay_gain_info != NULL) {
+		static unsigned serial;
+		if (++serial == 0)
+			serial = 1;
+
+		decoder->replay_gain_info = *replay_gain_info;
+		decoder->replay_gain_serial = serial;
+
+		if (decoder->chunk != NULL) {
+			/* flush the current chunk because the new
+			   replay gain values affect the following
+			   samples */
+			decoder_flush_chunk(decoder);
+			player_lock_signal();
+		}
+	} else
+		decoder->replay_gain_serial = 0;
+}
+
+void
+decoder_mixramp(struct decoder *decoder,
+		char *mixramp_start, char *mixramp_end)
+{
+	assert(decoder != NULL);
+	struct decoder_control *dc = decoder->dc;
+	assert(dc != NULL);
+
+	dc_mixramp_start(dc, mixramp_start);
+	dc_mixramp_end(dc, mixramp_end);
 }

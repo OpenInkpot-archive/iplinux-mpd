@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -185,7 +185,7 @@ lame_encoder_open(struct encoder *_encoder, struct audio_format *audio_format,
 {
 	struct lame_encoder *encoder = (struct lame_encoder *)_encoder;
 
-	audio_format->bits = 16;
+	audio_format->format = SAMPLE_FORMAT_S16;
 	audio_format->channels = 2;
 
 	encoder->audio_format = *audio_format;
@@ -275,6 +275,12 @@ lame_encoder_read(struct encoder *_encoder, void *dest, size_t length)
 	return length;
 }
 
+static const char *
+lame_encoder_get_mime_type(G_GNUC_UNUSED struct encoder *_encoder)
+{
+	return "audio/mpeg";
+}
+
 const struct encoder_plugin lame_encoder_plugin = {
 	.name = "lame",
 	.init = lame_encoder_init,
@@ -283,4 +289,5 @@ const struct encoder_plugin lame_encoder_plugin = {
 	.close = lame_encoder_close,
 	.write = lame_encoder_write,
 	.read = lame_encoder_read,
+	.get_mime_type = lame_encoder_get_mime_type,
 };

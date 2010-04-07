@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -212,7 +212,7 @@ vorbis_encoder_open(struct encoder *_encoder,
 	struct vorbis_encoder *encoder = (struct vorbis_encoder *)_encoder;
 	bool ret;
 
-	audio_format->bits = 16;
+	audio_format->format = SAMPLE_FORMAT_S16;
 
 	encoder->audio_format = *audio_format;
 
@@ -382,6 +382,12 @@ vorbis_encoder_read(struct encoder *_encoder, void *_dest, size_t length)
 	return nbytes;
 }
 
+static const char *
+vorbis_encoder_get_mime_type(G_GNUC_UNUSED struct encoder *_encoder)
+{
+	return  "application/x-ogg";
+}
+
 const struct encoder_plugin vorbis_encoder_plugin = {
 	.name = "vorbis",
 	.init = vorbis_encoder_init,
@@ -392,4 +398,5 @@ const struct encoder_plugin vorbis_encoder_plugin = {
 	.tag = vorbis_encoder_tag,
 	.write = vorbis_encoder_write,
 	.read = vorbis_encoder_read,
+	.get_mime_type = vorbis_encoder_get_mime_type,
 };

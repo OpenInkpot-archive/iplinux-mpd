@@ -5,17 +5,19 @@
 
 #ifdef HAVE_CUE /* libcue */
 
-#include "tag.h"
+#include <stdio.h>
 
-#include <libcue/libcue.h>
+struct tag;
+struct Cd;
 
-struct tag*
-cue_tag_file(	FILE*,
-		const unsigned int);
+struct tag *
+cue_tag(struct Cd *cd, unsigned tnum);
 
-struct tag*
-cue_tag_string(	char*,
-		const unsigned int);
+struct tag *
+cue_tag_file(FILE *file, unsigned tnum);
+
+struct tag *
+cue_tag_string(const char *str, unsigned tnum);
 
 #endif /* libcue */
 #endif

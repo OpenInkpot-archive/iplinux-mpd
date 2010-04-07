@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -20,6 +20,7 @@
 #include "config.h"
 #include "decoder_list.h"
 #include "decoder_api.h"
+#include "input_init.h"
 #include "input_stream.h"
 #include "audio_format.h"
 #include "pcm_volume.h"
@@ -63,11 +64,6 @@ decoder_initialized(G_GNUC_UNUSED struct decoder *decoder,
 {
 }
 
-char *decoder_get_uri(G_GNUC_UNUSED struct decoder *decoder)
-{
-	return NULL;
-}
-
 enum decoder_command
 decoder_get_command(G_GNUC_UNUSED struct decoder *decoder)
 {
@@ -92,15 +88,20 @@ decoder_read(G_GNUC_UNUSED struct decoder *decoder,
 	     struct input_stream *is,
 	     void *buffer, size_t length)
 {
-	return input_stream_read(is, buffer, length);
+	return input_stream_read(is, buffer, length, NULL);
+}
+
+void
+decoder_timestamp(G_GNUC_UNUSED struct decoder *decoder,
+		  G_GNUC_UNUSED double t)
+{
 }
 
 enum decoder_command
 decoder_data(G_GNUC_UNUSED struct decoder *decoder,
 	     G_GNUC_UNUSED struct input_stream *is,
 	     const void *data, size_t datalen,
-	     G_GNUC_UNUSED float data_time, G_GNUC_UNUSED uint16_t bit_rate,
-	     G_GNUC_UNUSED struct replay_gain_info *replay_gain_info)
+	     G_GNUC_UNUSED uint16_t bit_rate)
 {
 	write(1, data, datalen);
 	return DECODE_COMMAND_NONE;
@@ -112,6 +113,20 @@ decoder_tag(G_GNUC_UNUSED struct decoder *decoder,
 	    G_GNUC_UNUSED const struct tag *tag)
 {
 	return DECODE_COMMAND_NONE;
+}
+
+void
+decoder_replay_gain(G_GNUC_UNUSED struct decoder *decoder,
+		    G_GNUC_UNUSED const struct replay_gain_info *replay_gain_info)
+{
+}
+
+void
+decoder_mixramp(G_GNUC_UNUSED struct decoder *decoder,
+		char *mixramp_start, char *mixramp_end)
+{
+	g_free(mixramp_start);
+	g_free(mixramp_end);
 }
 
 static void
@@ -128,6 +143,7 @@ print_tag(const struct tag *tag)
 
 int main(int argc, char **argv)
 {
+	GError *error = NULL;
 	const char *decoder_name, *path;
 	const struct decoder_plugin *plugin;
 	struct tag *tag;
@@ -146,7 +162,12 @@ int main(int argc, char **argv)
 	decoder_name = argv[1];
 	path = argv[2];
 
-	input_stream_global_init();
+	if (!input_stream_global_init(&error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
+		return 2;
+	}
+
 	decoder_plugin_init_all();
 
 	plugin = decoder_plugin_from_name(decoder_name);
@@ -156,6 +177,20 @@ int main(int argc, char **argv)
 	}
 
 	tag = decoder_plugin_tag_dup(plugin, path);
+	if (tag == NULL && plugin->stream_tag != NULL) {
+		struct input_stream *is = input_stream_open(path, &error);
+
+		if (is == NULL) {
+			g_printerr("Failed to open %s: %s\n",
+				   path, error->message);
+			g_error_free(error);
+			return 1;
+		}
+
+		tag = decoder_plugin_stream_tag(plugin, is);
+		input_stream_close(is);
+	}
+
 	decoder_plugin_deinit_all();
 	input_stream_global_finish();
 	if (tag == NULL) {

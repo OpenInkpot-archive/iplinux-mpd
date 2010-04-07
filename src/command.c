@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -46,7 +46,7 @@
 #include "client.h"
 #include "tag_print.h"
 #include "path.h"
-#include "replay_gain.h"
+#include "replay_gain_config.h"
 #include "idle.h"
 
 #ifdef ENABLE_SQLITE
@@ -76,6 +76,8 @@
 #define COMMAND_STATUS_BITRATE          "bitrate"
 #define COMMAND_STATUS_ERROR            "error"
 #define COMMAND_STATUS_CROSSFADE	"xfade"
+#define COMMAND_STATUS_MIXRAMPDB	"mixrampdb"
+#define COMMAND_STATUS_MIXRAMPDELAY	"mixrampdelay"
 #define COMMAND_STATUS_AUDIO		"audio"
 #define COMMAND_STATUS_UPDATING_DB	"updating_db"
 
@@ -294,6 +296,23 @@ check_bool(struct client *client, bool *value_r, const char *s)
 	return true;
 }
 
+static bool
+check_float(struct client *client, float *value_r, const char *s)
+{
+	float value;
+	char *endptr;
+
+	value = strtof(s, &endptr);
+	if (*endptr != 0 && endptr == s) {
+		command_error(client, ACK_ERROR_ARG,
+			      "Float expected: %s", s);
+		return false;
+	}
+
+	*value_r = value;
+	return true;
+}
+
 static enum command_return
 print_playlist_result(struct client *client,
 		      enum playlist_result result)
@@ -495,6 +514,8 @@ handle_status(struct client *client,
 		      COMMAND_STATUS_PLAYLIST ": %li\n"
 		      COMMAND_STATUS_PLAYLIST_LENGTH ": %i\n"
 		      COMMAND_STATUS_CROSSFADE ": %i\n"
+		      COMMAND_STATUS_MIXRAMPDB ": %f\n"
+		      COMMAND_STATUS_MIXRAMPDELAY ": %f\n"
 		      COMMAND_STATUS_STATE ": %s\n",
 		      volume_level_get(),
 		      playlist_get_repeat(&g_playlist),
@@ -504,6 +525,8 @@ handle_status(struct client *client,
 		      playlist_get_version(&g_playlist),
 		      playlist_get_length(&g_playlist),
 		      (int)(pc_get_cross_fade() + 0.5),
+		      pc_get_mixramp_db(),
+		      pc_get_mixramp_delay(),
 		      state);
 
 	song = playlist_get_current_song(&g_playlist);
@@ -733,6 +756,9 @@ handle_load(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 static enum command_return
 handle_listplaylist(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 {
+	if (playlist_file_print(client, argv[1], false))
+		return COMMAND_RETURN_OK;
+
 	bool ret;
 
 	ret = spl_print(client, argv[1], false);
@@ -748,6 +774,9 @@ static enum command_return
 handle_listplaylistinfo(struct client *client,
 			G_GNUC_UNUSED int argc, char *argv[])
 {
+	if (playlist_file_print(client, argv[1], true))
+		return COMMAND_RETURN_OK;
+
 	bool ret;
 
 	ret = spl_print(client, argv[1], true);
@@ -1049,8 +1078,18 @@ handle_update(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 	unsigned ret;
 
 	assert(argc <= 2);
-	if (argc == 2)
+	if (argc == 2) {
 		path = argv[1];
+
+		if (*path == 0 || strcmp(path, "/") == 0)
+			/* backwards compatibility with MPD 0.15 */
+			path = NULL;
+		else if (!uri_safe_local(path)) {
+			command_error(client, ACK_ERROR_ARG,
+				      "Malformed path");
+			return COMMAND_RETURN_ERROR;
+		}
+	}
 
 	ret = update_enqueue(path, false);
 	if (ret > 0) {
@@ -1070,8 +1109,15 @@ handle_rescan(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 	unsigned ret;
 
 	assert(argc <= 2);
-	if (argc == 2)
+	if (argc == 2) {
 		path = argv[1];
+
+		if (!uri_safe_local(path)) {
+			command_error(client, ACK_ERROR_ARG,
+				      "Malformed path");
+			return COMMAND_RETURN_ERROR;
+		}
+	}
 
 	ret = update_enqueue(path, true);
 	if (ret > 0) {
@@ -1423,6 +1469,30 @@ handle_crossfade(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
 	if (!check_unsigned(client, &xfade_time, argv[1]))
 		return COMMAND_RETURN_ERROR;
 	pc_set_cross_fade(xfade_time);
+
+	return COMMAND_RETURN_OK;
+}
+
+static enum command_return
+handle_mixrampdb(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
+{
+	float db;
+
+	if (!check_float(client, &db, argv[1]))
+		return COMMAND_RETURN_ERROR;
+	pc_set_mixramp_db(db);
+
+	return COMMAND_RETURN_OK;
+}
+
+static enum command_return
+handle_mixrampdelay(struct client *client, G_GNUC_UNUSED int argc, char *argv[])
+{
+	float delay_secs;
+
+	if (!check_float(client, &delay_secs, argv[1]))
+		return COMMAND_RETURN_ERROR;
+	pc_set_mixramp_delay(delay_secs);
 
 	return COMMAND_RETURN_OK;
 }
@@ -1782,6 +1852,8 @@ static const struct command commands[] = {
 	{ "listplaylists", PERMISSION_READ, 0, 0, handle_listplaylists },
 	{ "load", PERMISSION_ADD, 1, 1, handle_load },
 	{ "lsinfo", PERMISSION_READ, 0, 1, handle_lsinfo },
+	{ "mixrampdb", PERMISSION_CONTROL, 1, 1, handle_mixrampdb },
+	{ "mixrampdelay", PERMISSION_CONTROL, 1, 1, handle_mixrampdelay },
 	{ "move", PERMISSION_CONTROL, 2, 2, handle_move },
 	{ "moveid", PERMISSION_CONTROL, 2, 2, handle_moveid },
 	{ "next", PERMISSION_CONTROL, 0, 0, handle_next },

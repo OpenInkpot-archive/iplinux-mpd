@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -63,7 +63,7 @@ int main(int argc, char **argv)
 	else
 		encoder_name = "vorbis";
 
-	audio_format_init(&audio_format, 44100, 16, 2);
+	audio_format_init(&audio_format, 44100, SAMPLE_FORMAT_S16, 2);
 
 	/* create the encoder */
 

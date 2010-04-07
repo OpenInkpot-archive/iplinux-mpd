@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -87,7 +87,7 @@ mpd_mpg123_open(mpg123_handle *handle, const char *path_fs,
 		return false;
 	}
 
-	if (!audio_format_init_checked(audio_format, rate, 16,
+	if (!audio_format_init_checked(audio_format, rate, SAMPLE_FORMAT_S16,
 				       channels, &gerror)) {
 		g_warning("%s", gerror->message);
 		g_error_free(gerror);
@@ -103,7 +103,7 @@ mpd_mpg123_file_decode(struct decoder *decoder, const char *path_fs)
 	struct audio_format audio_format;
 	mpg123_handle *handle;
 	int error;
-	off_t num_samples, position;
+	off_t num_samples;
 	enum decoder_command cmd;
 
 	/* open the file */
@@ -134,8 +134,6 @@ mpd_mpg123_file_decode(struct decoder *decoder, const char *path_fs)
 		unsigned char buffer[8192];
 		size_t nbytes;
 
-		position = mpg123_tell(handle);
-
 		/* decode */
 
 		error = mpg123_read(handle, buffer, sizeof(buffer), &nbytes);
@@ -148,10 +146,7 @@ mpd_mpg123_file_decode(struct decoder *decoder, const char *path_fs)
 
 		/* send to MPD */
 
-		cmd = decoder_data(decoder, NULL, buffer, nbytes,
-				   (float)position /
-				   (float)audio_format.sample_rate,
-				   0, NULL);
+		cmd = decoder_data(decoder, NULL, buffer, nbytes, 0);
 
 		/* seeking not yet implemented */
 	} while (cmd == DECODE_COMMAND_NONE);

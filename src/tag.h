@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -182,6 +182,15 @@ struct tag *tag_dup(const struct tag *tag);
  */
 struct tag *
 tag_merge(const struct tag *base, const struct tag *add);
+
+/**
+ * Merges the data from two tags.  Any of the two may be NULL.  Both
+ * are freed by this function.
+ *
+ * @return a newly allocated tag, which must be freed with tag_free()
+ */
+struct tag *
+tag_merge_replace(struct tag *base, struct tag *add);
 
 /**
  * Returns true if the tag contains no items.  This ignores the "time"

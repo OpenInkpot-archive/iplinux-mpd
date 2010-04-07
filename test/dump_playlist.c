@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -18,6 +18,7 @@
  */
 
 #include "config.h"
+#include "input_init.h"
 #include "input_stream.h"
 #include "tag_pool.h"
 #include "tag_save.h"
@@ -43,8 +44,7 @@ my_log_func(const gchar *log_domain, G_GNUC_UNUSED GLogLevelFlags log_level,
 int main(int argc, char **argv)
 {
 	const char *uri;
-	struct input_stream is;
-	bool stream_open = false;
+	struct input_stream *is = NULL;
 	bool success;
 	GError *error = NULL;
 	struct playlist_provider *playlist;
@@ -73,7 +73,12 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	input_stream_global_init();
+	if (!input_stream_global_init(&error)) {
+		g_warning("%s", error->message);
+		g_error_free(error);
+		return 2;
+	}
+
 	playlist_list_global_init();
 
 	/* open the playlist */
@@ -82,30 +87,35 @@ int main(int argc, char **argv)
 	if (playlist == NULL) {
 		/* open the stream and wait until it becomes ready */
 
-		success = input_stream_open(&is, uri);
-		if (!success) {
-			g_printerr("input_stream_open() failed\n");
+		is = input_stream_open(uri, &error);
+		if (is == NULL) {
+			if (error != NULL) {
+				g_warning("%s", error->message);
+				g_error_free(error);
+			} else
+				g_printerr("input_stream_open() failed\n");
 			return 2;
 		}
 
-		while (!is.ready) {
-			int ret = input_stream_buffer(&is);
-			if (ret < 0)
+		while (!is->ready) {
+			int ret = input_stream_buffer(is, &error);
+			if (ret < 0) {
 				/* error */
+				g_warning("%s", error->message);
+				g_error_free(error);
 				return 2;
+			}
 
 			if (ret == 0)
 				/* nothing was buffered - wait */
 				g_usleep(10000);
 		}
 
-		stream_open = true;
-
 		/* open the playlist */
 
-		playlist = playlist_list_open_stream(&is, uri);
+		playlist = playlist_list_open_stream(is, uri);
 		if (playlist == NULL) {
-			input_stream_close(&is);
+			input_stream_close(is);
 			g_printerr("Failed to open playlist\n");
 			return 2;
 		}
@@ -115,6 +125,14 @@ int main(int argc, char **argv)
 
 	while ((song = playlist_plugin_read(playlist)) != NULL) {
 		g_print("%s\n", song->uri);
+
+		if (song->start_ms > 0 || song->end_ms > 0)
+			g_print("range: %u:%02u..%u:%02u\n",
+				song->start_ms / 60000,
+				(song->start_ms / 1000) % 60,
+				song->end_ms / 60000,
+				(song->end_ms / 1000) % 60);
+
 		if (song->tag != NULL)
 			tag_save(stdout, song->tag);
 
@@ -124,8 +142,8 @@ int main(int argc, char **argv)
 	/* deinitialize everything */
 
 	playlist_plugin_close(playlist);
-	if (stream_open)
-		input_stream_close(&is);
+	if (is != NULL)
+		input_stream_close(is);
 	playlist_list_global_finish();
 	input_stream_global_finish();
 	config_global_finish();

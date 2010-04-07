@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -38,6 +38,9 @@ struct pcm_convert_state {
 
 	/** the buffer for converting the sample format */
 	struct pcm_buffer format_buffer;
+
+	/** the buffer for converting to/from packed samples */
+	struct pcm_buffer pack_buffer;
 
 	/** the buffer for converting the channel count */
 	struct pcm_buffer channels_buffer;

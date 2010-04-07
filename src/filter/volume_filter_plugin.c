@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -69,25 +69,12 @@ volume_filter_finish(struct filter *filter)
 }
 
 static const struct audio_format *
-volume_filter_open(struct filter *_filter,
-		   const struct audio_format *audio_format,
-		   GError **error_r)
+volume_filter_open(struct filter *_filter, struct audio_format *audio_format,
+		   G_GNUC_UNUSED GError **error_r)
 {
 	struct volume_filter *filter = (struct volume_filter *)_filter;
 
-	if (audio_format->bits != 8 && audio_format->bits != 16 &&
-	    audio_format->bits != 24) {
-		g_set_error(error_r, volume_quark(), 0,
-			    "Unsupported audio format");
-		return false;
-	}
-
-	if (audio_format->reverse_endian) {
-		g_set_error(error_r, volume_quark(), 0,
-			    "Software volume for reverse endian "
-			    "samples is not implemented");
-		return false;
-	}
+	audio_format->reverse_endian = false;
 
 	filter->audio_format = *audio_format;
 	pcm_buffer_init(&filter->buffer);
@@ -111,14 +98,13 @@ volume_filter_filter(struct filter *_filter, const void *src, size_t src_size,
 	bool success;
 	void *dest;
 
-	if (filter->volume >= PCM_VOLUME_1) {
+	*dest_size_r = src_size;
+
+	if (filter->volume >= PCM_VOLUME_1)
 		/* optimized special case: 100% volume = no-op */
-		*dest_size_r = src_size;
 		return src;
-	}
 
 	dest = pcm_buffer_get(&filter->buffer, src_size);
-	*dest_size_r = src_size;
 
 	if (filter->volume <= 0) {
 		/* optimized special case: 0% volume = memset(0) */

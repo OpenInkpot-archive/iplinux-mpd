@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -31,7 +31,7 @@
 #include "decoder_command.h"
 #include "decoder_plugin.h"
 #include "input_stream.h"
-#include "replay_gain.h"
+#include "replay_gain_info.h"
 #include "tag.h"
 #include "audio_format.h"
 #include "conf.h"
@@ -52,15 +52,6 @@ void
 decoder_initialized(struct decoder *decoder,
 		    const struct audio_format *audio_format,
 		    bool seekable, float total_time);
-
-/**
- * Returns the URI of the current song in UTF-8 encoding.
- *
- * @param decoder the decoder object
- * @return an allocated string which must be freed with g_free()
- */
-char *
-decoder_get_uri(struct decoder *decoder);
 
 /**
  * Determines the pending decoder command.
@@ -115,6 +106,15 @@ decoder_read(struct decoder *decoder, struct input_stream *is,
 	     void *buffer, size_t length);
 
 /**
+ * Sets the time stamp for the next data chunk [seconds].  The MPD
+ * core automatically counts it up, and a decoder plugin only needs to
+ * use this function if it thinks that adding to the time stamp based
+ * on the buffer size won't work.
+ */
+void
+decoder_timestamp(struct decoder *decoder, double t);
+
+/**
  * This function is called by the decoder plugin when it has
  * successfully decoded block of input data.
  *
@@ -129,8 +129,7 @@ decoder_read(struct decoder *decoder, struct input_stream *is,
 enum decoder_command
 decoder_data(struct decoder *decoder, struct input_stream *is,
 	     const void *data, size_t length,
-	     float data_time, uint16_t bitRate,
-	     struct replay_gain_info *replay_gain_info);
+	     uint16_t kbit_rate);
 
 /**
  * This function is called by the decoder plugin when it has
@@ -146,5 +145,27 @@ decoder_data(struct decoder *decoder, struct input_stream *is,
 enum decoder_command
 decoder_tag(struct decoder *decoder, struct input_stream *is,
 	    const struct tag *tag);
+
+/**
+ * Set replay gain values for the following chunks.
+ *
+ * @param decoder the decoder object
+ * @param rgi the replay_gain_info object; may be NULL to invalidate
+ * the previous replay gain values
+ */
+void
+decoder_replay_gain(struct decoder *decoder,
+		    const struct replay_gain_info *replay_gain_info);
+
+/**
+ * Store MixRamp tags.
+ *
+ * @param decoder the decoder object
+ * @param mixramp_start the mixramp_start tag; may be NULL to invalidate
+ * @param mixramp_end the mixramp_end tag; may be NULL to invalidate
+ */
+void
+decoder_mixramp(struct decoder *decoder,
+		char *mixramp_start, char *mixramp_end);
 
 #endif

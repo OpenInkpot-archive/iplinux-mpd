@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -57,7 +57,12 @@ read_text_line(FILE *file, GString *buffer)
 		g_string_set_size(buffer, length + step);
 	}
 
+	/* remove the newline characters */
+	if (buffer->str[length - 1] == '\n')
+		--length;
+	if (buffer->str[length - 1] == '\r')
+		--length;
+
 	g_string_set_size(buffer, length);
-	g_strchomp(buffer->str);
 	return buffer->str;
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2003-2009 The Music Player Daemon Project
+ * Copyright (C) 2003-2010 The Music Player Daemon Project
  * http://www.musicpd.org
  *
  * This program is free software; you can redistribute it and/or modify
@@ -28,6 +28,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 #else /* G_OS_WIN32 */
+#define WINVER 0x0501
 #include <ws2tcpip.h>
 #include <winsock.h>
 #endif /* G_OS_WIN32 */
