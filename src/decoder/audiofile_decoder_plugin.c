@@ -39,11 +39,11 @@ static int audiofile_get_duration(const char *file)
 	if (af_fp == AF_NULL_FILEHANDLE) {
 		return -1;
 	}
-	total_time = (int)
-	    ((double)afGetFrameCount(af_fp, AF_DEFAULT_TRACK)
-	     / afGetRate(af_fp, AF_DEFAULT_TRACK));
+    int frames = afGetFrameCount(af_fp, AF_DEFAULT_TRACK);
+    double rate =  afGetRate(af_fp, AF_DEFAULT_TRACK);
+	total_time = (int) ( frames / rate);
 	afCloseFile(af_fp);
-	return total_time;
+	return  total_time;
 }
 
 static ssize_t
@@ -229,6 +229,7 @@ static struct tag *audiofile_tag_dup(const char *file)
 	if (total_time >= 0) {
 		ret = tag_new();
 		ret->time = total_time;
+        g_debug("ret->time = %d\n",  ret->time);
 	} else {
 		g_debug("Failed to get total song time from: %s\n",
 			file);
@@ -244,7 +245,7 @@ static const char *const audiofile_suffixes[] = {
 static const char *const audiofile_mime_types[] = {
 	"audio/x-wav",
 	"audio/x-aiff",
-	NULL 
+	NULL
 };
 
 const struct decoder_plugin audiofile_decoder_plugin = {
