@@ -4,6 +4,11 @@ mpd (0.15.6-1.ip2) asimov; urgency=low
   * Fix issue with wrong durations in .wav
 
  -- Alexander V. Nikolaev <avn@daemon.hole.ru>  Wed, 07 Apr 2010 21:53:07 +0300
+mpd (0.15.6-1.ip1+b1) zelazny; urgency=low
+
+  * Rebuild due to updated glib2.0
+
+ -- Mikhail Gusarov <dottedmag@dottedmag.net>  Tue, 19 Jan 2010 07:34:37 +0600
 
 mpd (0.15.6-1.ip1) asimov; urgency=low
 
