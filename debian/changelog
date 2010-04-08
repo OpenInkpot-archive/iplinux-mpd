@@ -1,4 +1,4 @@
-mpd (0.15.6-1.ip2) asimov; urgency=low
+mpd (0.15.6-1.ip2) zelazny; urgency=low
 
   * Rebase to upstream 50c0c4b7012f185655574f37cae3cde8e9293112
   * Fix issue with wrong durations in .wav
