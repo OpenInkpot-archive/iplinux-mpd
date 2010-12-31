@@ -1,3 +1,10 @@
+mpd (0.15.6-1.ip3) zelazny; urgency=low
+
+  * Manpages removed (Closes: #871).
+  * Empty /usr/share/doc directory removed.
+
+ -- Mikhail Gusarov <dottedmag@dottedmag.net>  Fri, 31 Dec 2010 15:41:44 +0100
+
 mpd (0.15.6-1.ip2) zelazny; urgency=low
 
   * Rebase to upstream 50c0c4b7012f185655574f37cae3cde8e9293112
