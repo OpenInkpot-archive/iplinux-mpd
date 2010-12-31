@@ -18,4 +18,4 @@ DEB_DH_STRIP_ARGS := --dbg-package=mpd-dbg
 DEB_DESTDIR = $(CURDIR)/debian/mpd
 
 binary-post-install/mpd::
-	rm -rf $(CURDIR)/debian/mpd/usr/share/doc/mpd
+	rm -rf $(CURDIR)/debian/mpd/usr/share
